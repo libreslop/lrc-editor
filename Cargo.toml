@@ -1,0 +1,49 @@
+[package]
+name = "lcs-editor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gloo-file = "0.3.0"
+gloo-render = "0.2.0"
+gloo-timers = "0.3.0"
+js-sys = "0.3.83"
+wasm-bindgen = "0.2.106"
+wasm-bindgen-futures = "0.4.56"
+yew = { version = "0.21.0", features = ["csr"] }
+
+[dependencies.web-sys]
+version = "0.3.83"
+features = [
+    "AudioBuffer",
+    "AudioContext",
+    "Blob",
+    "BlobPropertyBag",
+    "CanvasRenderingContext2d",
+    "Clipboard",
+    "Document",
+    "DomRect",
+    "Element",
+    "Event",
+    "File",
+    "FileList",
+    "HtmlAnchorElement",
+    "HtmlAudioElement",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlTextAreaElement",
+    "InputEvent",
+    "KeyboardEvent",
+    "MouseEvent",
+    "Navigator",
+    "PointerEvent",
+    "Url",
+    "WheelEvent",
+    "Window",
+]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
