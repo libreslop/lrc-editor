@@ -170,6 +170,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let last_lyric_ms = props.state.document.as_ref().and_then(|doc| doc.last_entry_time_ms()).unwrap_or(0);
     let duration_ms = props.state.duration_ms.max(last_lyric_ms) + 10000;
     let width_px = (duration_ms as f64 / 1000.0) * px_per_second;
+    let audio_width_px = (props.state.duration_ms as f64 / 1000.0) * px_per_second;
 
     // Draw waveform once duration is set and url is present
     {
@@ -515,7 +516,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     <div class="timeline-content" style={format!("width: {}px;", width_px)} onmousedown={on_timeline_mousedown}>
                         <div class="ruler"></div>
                         <div class="track-lane audio-lane">
-                            <canvas ref={canvas_ref} class="waveform-canvas"></canvas>
+                            <canvas ref={canvas_ref} class="waveform-canvas" style={format!("width: {}px;", audio_width_px)}></canvas>
                             if audio_url.is_none() {
                                 <div class="import-audio-button" onclick={import_click}>
                                     { "Import audio" }
