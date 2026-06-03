@@ -130,6 +130,14 @@ pub struct MetadataTag {
 }
 
 impl MetadataTag {
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+    
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
     fn from_line(line: &str, source_line: SourceLine) -> Option<Self> {
         let close_index = line.find(']')?;
 
@@ -215,6 +223,7 @@ pub struct TimelineChunk {
     start_ms: u32,
     end_ms: u32,
     text: String,
+    is_empty: bool,
 }
 
 impl TimelineChunk {
@@ -236,6 +245,11 @@ impl TimelineChunk {
     /// Visible text on the chunk.
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Whether this chunk represents an empty gap.
+    pub fn is_empty(&self) -> bool {
+        self.is_empty
     }
 }
 
@@ -308,7 +322,6 @@ impl LrcDocument {
         self.entries
             .iter()
             .enumerate()
-            .filter(|(_, entry)| !entry.is_empty())
             .map(|(index, entry)| TimelineChunk {
                 entry_id: entry.id,
                 start_ms: entry.time_ms(),
@@ -317,8 +330,24 @@ impl LrcDocument {
                     .get(index + 1)
                     .map_or(duration_ms, LyricEntry::time_ms),
                 text: entry.display_text.clone(),
+                is_empty: entry.is_empty(),
             })
             .collect()
+    }
+
+    /// Regenerate the LRC source text from current metadata and entries.
+    pub fn to_source_text(&self) -> String {
+        let mut text = String::new();
+        for tag in &self.metadata {
+            text.push_str(&format!("[{}:{}]\n", tag.key, tag.value));
+        }
+        for entry in &self.entries {
+            let mins = entry.time_ms() / 60000;
+            let secs = (entry.time_ms() % 60000) / 1000;
+            let hund = (entry.time_ms() % 1000) / 10;
+            text.push_str(&format!("[{:02}:{:02}.{:02}]{}\n", mins, secs, hund, entry.text()));
+        }
+        text
     }
 }
 
@@ -686,14 +715,17 @@ mod tests {
     }
 
     #[test]
-    fn omits_empty_lines_from_timeline_chunks() {
+    fn includes_empty_lines_in_timeline_chunks() {
         let document = parse_ok("[00:01.00] One\n[00:02.00] \n[00:03.00] Three");
         let chunks = document.timeline_chunks(5_000);
 
-        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks.len(), 3);
         assert_eq!(chunks[0].entry_id(), 0);
         assert_eq!(chunks[0].end_ms(), 2_000);
-        assert_eq!(chunks[1].entry_id(), 2);
+        assert_eq!(chunks[1].entry_id(), 1);
+        assert!(chunks[1].is_empty());
+        assert_eq!(chunks[1].end_ms(), 3_000);
+        assert_eq!(chunks[2].entry_id(), 2);
     }
 
     #[test]

@@ -61,11 +61,12 @@ button {
 .editor-shell {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   width: 100vw;
   height: 100vh;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 90px),
-    var(--bg);
+    radial-gradient(ellipse at bottom left, rgba(29, 34, 40, 0.4) 0%, transparent 40%),
+    radial-gradient(ellipse at top right, rgba(43, 50, 58, 0.3) 0%, transparent 40%);
 }
 
 .top-split {
@@ -264,12 +265,13 @@ svg {
 
 .lyrics-preview {
   position: relative;
+  flex: 1;
   min-height: 0;
-  overflow: auto;
-  padding: 10px 0 80px;
+  padding: 16px 20px;
+  overflow-y: auto;
+  scroll-behavior: smooth;
   background: #1d2228;
   scrollbar-color: #646d79 #252b32;
-  scroll-behavior: smooth;
 }
 
 .lyric-row {
@@ -318,13 +320,21 @@ svg {
 
 .timeline-panel {
   display: grid;
-  grid-template-rows: 44px auto 42px;
+  grid-template-rows: 44px auto 20px;
   min-height: 0;
+  min-width: 0;
   background: #242930;
+  user-select: none;
 }
 
 .transport-strip {
-  border-bottom-color: #3e4650;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  min-width: 0;
 }
 
 .timecode {
@@ -346,6 +356,7 @@ svg {
   display: grid;
   grid-template-columns: var(--track-pad) minmax(0, 1fr);
   min-height: 0;
+  min-width: 0;
   border-bottom: 1px solid var(--line-strong);
 }
 
@@ -511,8 +522,38 @@ svg {
 }
 
 .lyric-chunk.selected {
-  outline: 2px solid var(--selection);
-  outline-offset: -3px;
+  background: var(--blue);
+  border-color: rgba(56, 126, 232, 0.78);
+  box-shadow: inset 0 -18px 0 rgba(0, 0, 0, 0.15), 0 0 0 2px var(--blue-glow);
+  z-index: 5;
+}
+
+.lyric-chunk.empty-gap {
+  background: var(--surface-low);
+  border: 1px dashed var(--line-strong);
+  color: transparent;
+  box-shadow: none;
+}
+
+.lyric-chunk.empty-gap.selected {
+  background: rgba(43, 116, 227, 0.2);
+}
+
+.edge-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 10;
+}
+
+.edge-handle.left {
+  left: 0;
+}
+
+.edge-handle.right {
+  right: 0;
 }
 
 .lyric-chunk.current {
@@ -552,12 +593,10 @@ svg {
 }
 
 .timeline-controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 8px 7px calc(var(--track-pad) + 8px);
+  display: block;
+  padding: 2px 8px 2px calc(var(--track-pad) + 8px);
   background: #2b3038;
+  min-width: 0;
 }
 
 .timeline-scroll {

@@ -411,13 +411,21 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let drag_target_id = drag_target_id.clone();
         Callback::from(move |_| {
             if let Some(mode) = *drag_mode {
-                let delta = *drag_offset_ms;
-                if delta != 0 {
-                    // Body means shift the selected chunks
-                    // LeftEdge means shift the selected chunks
-                    // RightEdge means shift the next chunks! (But since we didn't implement complex next-chunk shift yet, let's treat Body and LeftEdge identically)
-                    // For now, ShiftSelected shifts all selected chunks.
-                    state.dispatch(AppAction::ShiftSelected(delta));
+                let offset = *drag_offset_ms;
+                if offset != 0 {
+                    match mode {
+                        DragMode::Body => state.dispatch(AppAction::ShiftSelected(offset)),
+                        DragMode::LeftEdge => {
+                            if let Some(id) = *drag_target_id {
+                                state.dispatch(AppAction::ShiftBoundary(id, true, offset));
+                            }
+                        }
+                        DragMode::RightEdge => {
+                            if let Some(id) = *drag_target_id {
+                                state.dispatch(AppAction::ShiftBoundary(id, false, offset));
+                            }
+                        }
+                    }
                 }
                 drag_mode.set(None);
                 drag_offset_ms.set(0);
@@ -436,9 +444,36 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     };
 
     let on_global_mouseup = {
+        let drag_mode = drag_mode.clone();
+        let drag_offset_ms = drag_offset_ms.clone();
+        let drag_target_id = drag_target_id.clone();
+        let state = props.state.clone();
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
+        
         Callback::from(move |_| {
             *is_scrollbar_dragged.borrow_mut() = false;
+            
+            if let Some(mode) = *drag_mode {
+                let offset = *drag_offset_ms;
+                if offset != 0 {
+                    match mode {
+                        DragMode::Body => state.dispatch(AppAction::ShiftSelected(offset)),
+                        DragMode::LeftEdge => {
+                            if let Some(id) = *drag_target_id {
+                                state.dispatch(AppAction::ShiftBoundary(id, true, offset));
+                            }
+                        }
+                        DragMode::RightEdge => {
+                            if let Some(id) = *drag_target_id {
+                                state.dispatch(AppAction::ShiftBoundary(id, false, offset));
+                            }
+                        }
+                    }
+                }
+                drag_mode.set(None);
+                drag_offset_ms.set(0);
+                drag_target_id.set(None);
+            }
         })
     };
 
@@ -533,10 +568,11 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                             end_px += offset_px;
                                         }
 
-                                        let width = (end_px - start_px).max(18.0);
+                                        let width = (end_px - start_px).max(1.0);
                                         
                                         let mut classes = classes!("lyric-chunk");
                                         if is_selected { classes.push("selected"); }
+                                        if chunk.is_empty() { classes.push("empty-gap"); }
                                         
                                         let onclick = {
                                             let state = props.state.clone();
@@ -559,9 +595,44 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                             let drag_start_x = drag_start_x.clone();
                                             let drag_target_id = drag_target_id.clone();
                                             let id = chunk.entry_id();
+                                            let state = props.state.clone();
+                                            let is_selected = is_selected;
                                             Callback::from(move |e: MouseEvent| {
                                                 e.stop_propagation();
+                                                if !is_selected {
+                                                    state.dispatch(AppAction::SelectEntry(id, SelectionMode::Replace));
+                                                }
                                                 drag_mode.set(Some(DragMode::Body));
+                                                drag_start_x.set(e.client_x() as f64);
+                                                drag_target_id.set(Some(id));
+                                            })
+                                        };
+                                        
+                                        let onmousedown_left = {
+                                            let drag_mode = drag_mode.clone();
+                                            let drag_start_x = drag_start_x.clone();
+                                            let drag_target_id = drag_target_id.clone();
+                                            let id = chunk.entry_id();
+                                            let state = props.state.clone();
+                                            Callback::from(move |e: MouseEvent| {
+                                                e.stop_propagation();
+                                                state.dispatch(AppAction::ClearSelection);
+                                                drag_mode.set(Some(DragMode::LeftEdge));
+                                                drag_start_x.set(e.client_x() as f64);
+                                                drag_target_id.set(Some(id));
+                                            })
+                                        };
+
+                                        let onmousedown_right = {
+                                            let drag_mode = drag_mode.clone();
+                                            let drag_start_x = drag_start_x.clone();
+                                            let drag_target_id = drag_target_id.clone();
+                                            let id = chunk.entry_id();
+                                            let state = props.state.clone();
+                                            Callback::from(move |e: MouseEvent| {
+                                                e.stop_propagation();
+                                                state.dispatch(AppAction::ClearSelection);
+                                                drag_mode.set(Some(DragMode::RightEdge));
                                                 drag_start_x.set(e.client_x() as f64);
                                                 drag_target_id.set(Some(id));
                                             })
@@ -575,6 +646,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                                 onmousedown={onmousedown_body}
                                             >
                                                 { chunk.text() }
+                                                <div class="edge-handle left" onmousedown={onmousedown_left}></div>
+                                                <div class="edge-handle right" onmousedown={onmousedown_right}></div>
                                             </div>
                                         }
                                     }).collect::<Html>()

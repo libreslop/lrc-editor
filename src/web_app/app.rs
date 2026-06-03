@@ -21,6 +21,7 @@ pub enum AppAction {
     SaveHistory(String),
     DeleteSelected,
     ShiftSelected(i32),
+    ShiftBoundary(usize, bool, i32),
 }
 
 #[derive(PartialEq)]
@@ -73,10 +74,6 @@ impl Reducible for AppState {
             }
             AppAction::SetTime(time) => {
                 new_state.current_time_ms = time;
-                if let Some(doc) = &new_state.document {
-                    let entry = doc.current_entry(time);
-                    new_state.selection.sync_to_active(entry, new_state.selection.suppresses_source_selection());
-                }
             }
             AppAction::SetDuration(time) => {
                 new_state.duration_ms = time;
@@ -87,10 +84,6 @@ impl Reducible for AppState {
             AppAction::Seek(time) => {
                 new_state.last_seek_request = Some(time);
                 new_state.current_time_ms = time;
-                if let Some(doc) = &new_state.document {
-                    let entry = doc.current_entry(time);
-                    new_state.selection.sync_to_active(entry, new_state.selection.suppresses_source_selection());
-                }
             }
             AppAction::Undo => {
                 if new_state.history_index > 0 {
@@ -152,18 +145,33 @@ impl Reducible for AppState {
             AppAction::ShiftSelected(delta_ms) => {
                 if !new_state.selection.selected_ids().is_empty() && delta_ms != 0 {
                     if let Some(doc) = &new_state.document {
-                        let mut text = new_state.source_text.clone();
-                        for id in new_state.selection.selected_ids().iter() {
-                            if let Some(entry) = doc.entries().iter().find(|e| e.id() == *id) {
-                                let old_tag = format!("[{}]", entry.timestamp());
-                                let new_time = (entry.time_ms() as i32 + delta_ms).max(0) as u32;
-                                let mins = new_time / 60000;
-                                let secs = (new_time % 60000) / 1000;
-                                let hund = (new_time % 1000) / 10;
-                                let new_tag = format!("[{:02}:{:02}.{:02}]", mins, secs, hund);
-                                text = text.replacen(&old_tag, &new_tag, 1);
-                            }
+                        let text = crate::web_app::editor::timeline::shift_selected(
+                            doc,
+                            new_state.selection.selected_ids(),
+                            delta_ms,
+                        );
+                        
+                        new_state.source_text = text.clone();
+                        if let Ok(new_doc) = crate::domain::LrcParser::new(&text).parse() {
+                            new_state.selection.prune(&new_doc);
+                            new_state.document = Some(new_doc);
+                            new_state.parse_error = None;
                         }
+                        new_state.history.truncate(new_state.history_index + 1);
+                        new_state.history.push(text);
+                        new_state.history_index = new_state.history.len() - 1;
+                    }
+                }
+            }
+            AppAction::ShiftBoundary(chunk_id, left_edge, delta_ms) => {
+                if delta_ms != 0 {
+                    if let Some(doc) = &new_state.document {
+                        let text = crate::web_app::editor::timeline::shift_boundary(
+                            doc,
+                            chunk_id,
+                            left_edge,
+                            delta_ms,
+                        );
                         
                         new_state.source_text = text.clone();
                         if let Ok(new_doc) = crate::domain::LrcParser::new(&text).parse() {
