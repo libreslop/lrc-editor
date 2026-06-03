@@ -110,46 +110,117 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         })
     };
 
-    let on_time_update = {
-        let state = props.state.clone();
-        Callback::from(move |e: Event| {
-            if let Some(audio) = e.target_dyn_into::<HtmlAudioElement>() {
-                state.dispatch(AppAction::SetTime((audio.current_time() * 1000.0) as u32));
-            }
-        })
-    };
-
+    // Removed on_time_update and on_ended because we now use a custom 16ms interval
+    // to drive the playhead, which allows it to continue moving past the audio duration.
+    
     let on_loaded_metadata = {
         let state = props.state.clone();
         Callback::from(move |e: Event| {
-            if let Some(audio) = e.target_dyn_into::<HtmlAudioElement>() {
+            if let Some(audio) = e.target_dyn_into::<web_sys::HtmlAudioElement>() {
                 state.dispatch(AppAction::SetDuration((audio.duration() * 1000.0) as u32));
             }
         })
     };
-
-    let on_ended = {
-        let state = props.state.clone();
-        Callback::from(move |_| {
-            if state.playing {
-                state.dispatch(AppAction::TogglePlay);
-            }
-        })
-    };
-
-    // Sync play/pause from state
     {
         let playing = props.state.playing;
         let audio_ref = audio_ref.clone();
+        let state = props.state.clone();
+        
+        let current_time_ref = yew::use_mut_ref(|| props.state.current_time_ms);
+        *current_time_ref.borrow_mut() = props.state.current_time_ms;
+
+        let bounds_ref = yew::use_mut_ref(|| (0u32, 0u32));
+        *bounds_ref.borrow_mut() = {
+            let audio_dur = props.state.duration_ms;
+            let last_nonempty = props.state.document.as_ref().and_then(|d| {
+                d.entries().iter().rev().find(|e| !e.is_empty()).map(|e| e.time_ms())
+            }).unwrap_or(0);
+            
+            let last_lyric = props.state.document.as_ref().and_then(|d| d.last_entry_time_ms()).unwrap_or(0);
+            let timeline_dur = audio_dur.max(last_lyric) + 10000;
+            
+            let base_max = if last_nonempty > audio_dur {
+                last_nonempty + 10000
+            } else {
+                audio_dur
+            };
+            (base_max, timeline_dur)
+        };
+
+        let last_seek_ref = yew::use_mut_ref(|| props.state.last_seek_request);
+        *last_seek_ref.borrow_mut() = props.state.last_seek_request;
+
         use_effect_with(playing, move |playing| {
-            if let Some(audio) = audio_ref.cast::<HtmlAudioElement>() {
-                if *playing {
-                    let _ = audio.play();
-                } else {
+            let mut interval_opt = None;
+            
+            if *playing {
+                let start_time = *current_time_ref.borrow();
+                
+                if let Some(audio) = audio_ref.cast::<web_sys::HtmlAudioElement>() {
+                    let audio_dur_ms = (audio.duration() * 1000.0) as u32;
+                    if start_time < audio_dur_ms {
+                        let _ = audio.play();
+                    }
+                }
+                
+                let last_time = js_sys::Date::now();
+                let last_time_ref = std::rc::Rc::new(std::cell::Cell::new(last_time));
+                
+                let mut local_current = start_time;
+                let mut last_handled_seek = *last_seek_ref.borrow();
+                
+                let interval = gloo_timers::callback::Interval::new(16, move || {
+                    let now = js_sys::Date::now();
+                    let delta = now - last_time_ref.get();
+                    last_time_ref.set(now);
+                    
+                    let current_seek = *last_seek_ref.borrow();
+                    if current_seek != last_handled_seek {
+                        last_handled_seek = current_seek;
+                        if let Some(seek_time) = current_seek {
+                            local_current = seek_time;
+                        }
+                    }
+                    
+                    let mut synced = false;
+                    if let Some(audio) = audio_ref.cast::<web_sys::HtmlAudioElement>() {
+                        let audio_dur_ms = (audio.duration() * 1000.0) as u32;
+                        if local_current < audio_dur_ms && !audio.paused() && !audio.ended() {
+                            local_current = (audio.current_time() * 1000.0) as u32;
+                            synced = true;
+                        }
+                    }
+                    
+                    if !synced {
+                        local_current += delta as u32;
+                    }
+                    
+                    let (base_max, timeline_dur) = *bounds_ref.borrow();
+                    let max_dur = if start_time >= base_max {
+                        timeline_dur
+                    } else {
+                        base_max
+                    };
+                    
+                    if local_current >= max_dur {
+                        local_current = max_dur;
+                        state.dispatch(AppAction::SetTime(local_current));
+                        state.dispatch(AppAction::TogglePlay);
+                    } else {
+                        state.dispatch(AppAction::SetTime(local_current));
+                    }
+                });
+                
+                interval_opt = Some(interval);
+            } else {
+                if let Some(audio) = audio_ref.cast::<web_sys::HtmlAudioElement>() {
                     let _ = audio.pause();
                 }
             }
-            || ()
+            
+            move || {
+                drop(interval_opt);
+            }
         });
     }
 
@@ -464,9 +535,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         <audio 
                             ref={audio_ref} 
                             src={url.clone()} 
-                            ontimeupdate={on_time_update}
                             onloadedmetadata={on_loaded_metadata}
-                            onended={on_ended}
                         />
                     }
                 } else {
