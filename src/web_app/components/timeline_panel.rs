@@ -85,6 +85,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let drag_start_x = use_state(|| 0.0);
     let drag_offset_ms = use_state(|| 0i32);
     let drag_target_id = use_state(|| None::<usize>);
+    let is_scrollbar_dragged = use_mut_ref(|| false);
 
     let on_file_change = {
         let audio_url = audio_url.clone();
@@ -227,17 +228,63 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     let zoom_in = {
         let state = props.state.clone();
+        let viewport_ref = viewport_ref.clone();
         let zoom = state.zoom_level;
+        let current_time_ms = state.current_time_ms;
         Callback::from(move |_| {
-            state.dispatch(AppAction::SetZoom(zoom * 1.25));
+            let old_px_per_second = 92.0 * zoom;
+            let new_zoom = zoom * 1.25;
+            let new_px_per_second = 92.0 * new_zoom;
+            let playhead_x_old = (current_time_ms as f64 / 1000.0) * old_px_per_second;
+            let playhead_x_new = (current_time_ms as f64 / 1000.0) * new_px_per_second;
+            
+            let screen_x = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                playhead_x_old - vp.scroll_left() as f64
+            } else {
+                0.0
+            };
+            let new_scroll = playhead_x_new - screen_x;
+
+            state.dispatch(AppAction::SetZoom(new_zoom));
+            
+            if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                let vp_clone = vp.clone();
+                let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
+                    vp_clone.set_scroll_left(new_scroll as i32);
+                });
+                let _ = web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(cb.unchecked_ref(), 0);
+            }
         })
     };
 
     let zoom_out = {
         let state = props.state.clone();
+        let viewport_ref = viewport_ref.clone();
         let zoom = state.zoom_level;
+        let current_time_ms = state.current_time_ms;
         Callback::from(move |_| {
-            state.dispatch(AppAction::SetZoom(zoom / 1.25));
+            let old_px_per_second = 92.0 * zoom;
+            let new_zoom = zoom / 1.25;
+            let new_px_per_second = 92.0 * new_zoom;
+            let playhead_x_old = (current_time_ms as f64 / 1000.0) * old_px_per_second;
+            let playhead_x_new = (current_time_ms as f64 / 1000.0) * new_px_per_second;
+            
+            let screen_x = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                playhead_x_old - vp.scroll_left() as f64
+            } else {
+                0.0
+            };
+            let new_scroll = playhead_x_new - screen_x;
+
+            state.dispatch(AppAction::SetZoom(new_zoom));
+            
+            if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                let vp_clone = vp.clone();
+                let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
+                    vp_clone.set_scroll_left(new_scroll as i32);
+                });
+                let _ = web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(cb.unchecked_ref(), 0);
+            }
         })
     };
 
@@ -258,6 +305,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let timecode_ref = timecode_ref.clone();
         let px_per_second_ref = use_mut_ref(|| px_per_second);
         *px_per_second_ref.borrow_mut() = px_per_second;
+        let is_scrollbar_dragged = is_scrollbar_dragged.clone();
 
         use_effect_with(playing, move |playing| {
             use wasm_bindgen::closure::Closure;
@@ -286,8 +334,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
                         let scroll_left = v.scroll_left() as f64;
                         let client_width = v.client_width() as f64;
-                        if playhead_x < scroll_left || playhead_x > scroll_left + client_width {
-                            v.set_scroll_left(playhead_x as i32);
+                        if !*is_scrollbar_dragged.borrow() {
+                            if playhead_x < scroll_left || playhead_x > scroll_left + client_width {
+                                v.set_scroll_left(playhead_x as i32);
+                            }
                         }
 
                         if let Some(tc) = timecode.cast::<web_sys::HtmlElement>() {
@@ -378,8 +428,22 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     let on_mouseleave = on_mouseup.clone();
 
+    let on_scrollbar_mousedown = {
+        let is_scrollbar_dragged = is_scrollbar_dragged.clone();
+        Callback::from(move |_| {
+            *is_scrollbar_dragged.borrow_mut() = true;
+        })
+    };
+
+    let on_global_mouseup = {
+        let is_scrollbar_dragged = is_scrollbar_dragged.clone();
+        Callback::from(move |_| {
+            *is_scrollbar_dragged.borrow_mut() = false;
+        })
+    };
+
     html! {
-        <div class="panel timeline-panel">
+        <div class="panel timeline-panel" onmouseup={on_global_mouseup.clone()} onmouseleave={on_global_mouseup.clone()}>
             <input 
                 type="file" 
                 accept="audio/*" 
@@ -411,6 +475,14 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                     }
                 </button>
+                <div class="zoom-controls">
+                    <button class="icon-button" title="Zoom Out" onclick={zoom_out}>
+                        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                    </button>
+                    <button class="icon-button" title="Zoom In" onclick={zoom_in}>
+                        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                    </button>
+                </div>
             </div>
             <div class="timeline-body">
                 <div class="track-pads">
@@ -462,11 +534,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                         }
 
                                         let width = (end_px - start_px).max(18.0);
-                                        let is_current = doc.current_entry(props.state.current_time_ms).map(|e| e.id()) == Some(chunk.entry_id());
                                         
                                         let mut classes = classes!("lyric-chunk");
                                         if is_selected { classes.push("selected"); }
-                                        if is_current { classes.push("current"); }
                                         
                                         let onclick = {
                                             let state = props.state.clone();
@@ -520,16 +590,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 </div>
             </div>
             <div class="timeline-controls">
-                <div class="timeline-scroll" ref={scrollbar_ref} onscroll={on_scrollbar_scroll}>
+                <div class="timeline-scroll" ref={scrollbar_ref} onscroll={on_scrollbar_scroll} onmousedown={on_scrollbar_mousedown}>
                     <div style={format!("width: {}px; height: 1px;", width_px)}></div>
-                </div>
-                <div class="zoom-controls">
-                    <button class="icon-button" title="Zoom Out" onclick={zoom_out}>
-                        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-                    </button>
-                    <button class="icon-button" title="Zoom In" onclick={zoom_in}>
-                        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-                    </button>
                 </div>
             </div>
         </div>

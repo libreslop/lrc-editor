@@ -1,4 +1,5 @@
 use yew::prelude::*;
+use wasm_bindgen::JsCast;
 use crate::web_app::app::{AppState, AppAction};
 use crate::domain::SelectionMode;
 
@@ -13,12 +14,27 @@ pub fn preview_panel(props: &PreviewPanelProps) -> Html {
     // We will need a way to detect scroll and detach autoscroll, but for now let's just render the lyrics.
     let is_autoscroll_active = use_state(|| true);
 
-    let on_scroll = {
+    let disable_autoscroll_wheel = {
         let is_autoscroll_active = is_autoscroll_active.clone();
-        Callback::from(move |_: Event| {
-            // If user scrolled manually, we detach autoscroll.
-            // A simple implementation: any scroll event detaches.
-            // A real implementation would distinguish programmatic vs user scroll.
+        Callback::from(move |_: WheelEvent| {
+            is_autoscroll_active.set(false);
+        })
+    };
+    let disable_autoscroll_mouse = {
+        let is_autoscroll_active = is_autoscroll_active.clone();
+        Callback::from(move |_: MouseEvent| {
+            is_autoscroll_active.set(false);
+        })
+    };
+    let disable_autoscroll_touch = {
+        let is_autoscroll_active = is_autoscroll_active.clone();
+        Callback::from(move |_: TouchEvent| {
+            is_autoscroll_active.set(false);
+        })
+    };
+    let disable_autoscroll_key = {
+        let is_autoscroll_active = is_autoscroll_active.clone();
+        Callback::from(move |_: KeyboardEvent| {
             is_autoscroll_active.set(false);
         })
     };
@@ -29,6 +45,26 @@ pub fn preview_panel(props: &PreviewPanelProps) -> Html {
             is_autoscroll_active.set(true);
         })
     };
+    
+    let preview_ref = use_node_ref();
+    {
+        let current_time_ms = props.state.current_time_ms;
+        let preview_ref = preview_ref.clone();
+        let is_autoscroll_active_val = *is_autoscroll_active;
+        use_effect_with((current_time_ms, is_autoscroll_active_val), move |(_, is_active)| {
+            if *is_active {
+                if let Some(preview) = preview_ref.cast::<web_sys::HtmlElement>() {
+                    if let Ok(Some(active)) = preview.query_selector(".active") {
+                        if let Ok(active) = active.dyn_into::<web_sys::HtmlElement>() {
+                            let target_y = active.offset_top() - preview.client_height() / 2 + active.offset_height() / 2;
+                            preview.set_scroll_top(target_y);
+                        }
+                    }
+                }
+            }
+            || ()
+        });
+    }
 
     html! {
         <div class="panel preview-panel">
@@ -42,7 +78,13 @@ pub fn preview_panel(props: &PreviewPanelProps) -> Html {
                     { "Resume autoscroll" }
                 </button>
             </div>
-            <div class="lyrics-preview" onscroll={on_scroll}>
+            <div class="lyrics-preview" 
+                ref={preview_ref}
+                onwheel={disable_autoscroll_wheel} 
+                onmousedown={disable_autoscroll_mouse} 
+                ontouchmove={disable_autoscroll_touch} 
+                onkeydown={disable_autoscroll_key}
+            >
                 {
                     if let Some(doc) = &props.state.document {
                         let current_entry = doc.current_entry(props.state.current_time_ms);

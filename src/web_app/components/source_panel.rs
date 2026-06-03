@@ -75,6 +75,26 @@ pub fn source_panel(props: &SourcePanelProps) -> Html {
 
     let invalid_class = if state.parse_error.is_some() { "invalid" } else { "" };
 
+    let textarea_ref = use_node_ref();
+
+    let onmouseenter = {
+        let textarea_ref = textarea_ref.clone();
+        Callback::from(move |_| {
+            if let Some(ta) = textarea_ref.cast::<HtmlTextAreaElement>() {
+                let _ = ta.focus();
+            }
+        })
+    };
+
+    let onmouseleave = {
+        let textarea_ref = textarea_ref.clone();
+        Callback::from(move |_| {
+            if let Some(ta) = textarea_ref.cast::<HtmlTextAreaElement>() {
+                let _ = ta.blur();
+            }
+        })
+    };
+
     html! {
         <div class="panel source-panel">
             <input type="file" accept=".lrc,.txt" ref={file_input_ref} style="display: none;" onchange={on_file_change} />
@@ -99,10 +119,13 @@ pub fn source_panel(props: &SourcePanelProps) -> Html {
                 </div>
             </div>
             <textarea 
+                ref={textarea_ref}
                 class={classes!("source-editor", invalid_class)}
                 value={state.source_text.clone()}
                 {oninput}
                 {onchange}
+                {onmouseenter}
+                {onmouseleave}
                 spellcheck="false"
             />
             if let Some(err) = &state.parse_error {

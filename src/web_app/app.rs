@@ -4,6 +4,7 @@ use crate::domain::{LrcDocument, LrcParser, SelectionState, SelectionMode};
 use super::components::source_panel::SourcePanel;
 use super::components::preview_panel::PreviewPanel;
 use super::components::timeline_panel::TimelinePanel;
+use wasm_bindgen::JsCast;
 
 pub enum AppAction {
     UpdateSource(String),
@@ -214,6 +215,33 @@ pub fn app() -> Html {
         history_index: 0,
         zoom_level: 1.0,
     });
+
+    {
+        let state = state.clone();
+        use_effect_with((), move |_| {
+            let window = web_sys::window().unwrap();
+            let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
+                if let Some(target) = e.target() {
+                    if let Ok(el) = target.dyn_into::<web_sys::HtmlElement>() {
+                        let tag = el.tag_name();
+                        if tag == "TEXTAREA" || tag == "INPUT" {
+                            return;
+                        }
+                    }
+                }
+                if e.key() == " " {
+                    e.prevent_default();
+                    state.dispatch(AppAction::TogglePlay);
+                }
+            }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+            
+            let _ = window.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
+            
+            move || {
+                let _ = window.remove_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
+            }
+        });
+    }
 
     html! {
         <div class="editor-shell">
