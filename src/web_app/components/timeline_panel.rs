@@ -7,7 +7,6 @@ use crate::domain::SelectionMode;
 
 fn draw_waveform(canvas: HtmlCanvasElement, url: String) {
     spawn_local(async move {
-        // We do a simple fetch to get the ArrayBuffer
         let mut opts = RequestInit::new();
         opts.set_method("GET");
         opts.set_mode(RequestMode::Cors);
@@ -61,14 +60,31 @@ pub struct TimelinePanelProps {
     pub state: UseReducerHandle<AppState>,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum DragMode {
+    Body,
+    LeftEdge,
+    RightEdge,
+}
+
 #[function_component(TimelinePanel)]
 pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
-    let px_per_second = 92.0;
+    let px_per_second = 92.0 * props.state.zoom_level;
     
     let audio_ref = use_node_ref();
     let file_input_ref = use_node_ref();
     let canvas_ref = use_node_ref();
+    let viewport_ref = use_node_ref();
+    let scrollbar_ref = use_node_ref();
+    let playhead_ref = use_node_ref();
+    let timecode_ref = use_node_ref();
+    
     let audio_url = use_state(|| None::<String>);
+
+    let drag_mode = use_state(|| None::<DragMode>);
+    let drag_start_x = use_state(|| 0.0);
+    let drag_offset_ms = use_state(|| 0i32);
+    let drag_target_id = use_state(|| None::<usize>);
 
     let on_file_change = {
         let audio_url = audio_url.clone();
@@ -169,6 +185,32 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         });
     }
 
+    let on_viewport_scroll = {
+        let scrollbar_ref = scrollbar_ref.clone();
+        Callback::from(move |e: Event| {
+            if let Some(viewport) = e.target_dyn_into::<web_sys::HtmlElement>() {
+                if let Some(scrollbar) = scrollbar_ref.cast::<web_sys::HtmlElement>() {
+                    if (scrollbar.scroll_left() - viewport.scroll_left()).abs() > 1 {
+                        scrollbar.set_scroll_left(viewport.scroll_left());
+                    }
+                }
+            }
+        })
+    };
+
+    let on_scrollbar_scroll = {
+        let viewport_ref = viewport_ref.clone();
+        Callback::from(move |e: Event| {
+            if let Some(scrollbar) = e.target_dyn_into::<web_sys::HtmlElement>() {
+                if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                    if (viewport.scroll_left() - scrollbar.scroll_left()).abs() > 1 {
+                        viewport.set_scroll_left(scrollbar.scroll_left());
+                    }
+                }
+            }
+        })
+    };
+
     let toggle_play = {
         let state = props.state.clone();
         Callback::from(move |_| {
@@ -183,6 +225,22 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         })
     };
 
+    let zoom_in = {
+        let state = props.state.clone();
+        let zoom = state.zoom_level;
+        Callback::from(move |_| {
+            state.dispatch(AppAction::SetZoom(zoom * 1.25));
+        })
+    };
+
+    let zoom_out = {
+        let state = props.state.clone();
+        let zoom = state.zoom_level;
+        Callback::from(move |_| {
+            state.dispatch(AppAction::SetZoom(zoom / 1.25));
+        })
+    };
+
     let time_str = {
         let total_secs = props.state.current_time_ms / 1000;
         let mins = total_secs / 60;
@@ -190,6 +248,135 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let ms = props.state.current_time_ms % 1000;
         format!("{:02}:{:02}.{:03}", mins, secs, ms)
     };
+
+    // Smooth playhead & auto pan
+    {
+        let playing = props.state.playing;
+        let audio_ref = audio_ref.clone();
+        let playhead_ref = playhead_ref.clone();
+        let viewport_ref = viewport_ref.clone();
+        let timecode_ref = timecode_ref.clone();
+        let px_per_second_ref = use_mut_ref(|| px_per_second);
+        *px_per_second_ref.borrow_mut() = px_per_second;
+
+        use_effect_with(playing, move |playing| {
+            use wasm_bindgen::closure::Closure;
+            use std::rc::Rc;
+            use std::cell::RefCell;
+
+            let cb = Rc::new(RefCell::new(None::<Closure<dyn FnMut()>>));
+            let cb_clone = cb.clone();
+            
+            let audio = audio_ref.clone();
+            let playhead = playhead_ref.clone();
+            let viewport = viewport_ref.clone();
+            let timecode = timecode_ref.clone();
+
+            if *playing {
+                *cb_clone.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+                    if let (Some(a), Some(p), Some(v)) = (
+                        audio.cast::<HtmlAudioElement>(),
+                        playhead.cast::<web_sys::HtmlElement>(),
+                        viewport.cast::<web_sys::HtmlElement>(),
+                    ) {
+                        let px = *px_per_second_ref.borrow();
+                        let ct = a.current_time();
+                        let playhead_x = ct * px;
+                        let _ = p.set_attribute("style", &format!("transform: translateX({}px);", playhead_x));
+
+                        let scroll_left = v.scroll_left() as f64;
+                        let client_width = v.client_width() as f64;
+                        if playhead_x < scroll_left || playhead_x > scroll_left + client_width {
+                            v.set_scroll_left(playhead_x as i32);
+                        }
+
+                        if let Some(tc) = timecode.cast::<web_sys::HtmlElement>() {
+                            let total_secs = ct as u32;
+                            let mins = total_secs / 60;
+                            let secs = total_secs % 60;
+                            let ms = (ct * 1000.0) as u32 % 1000;
+                            tc.set_inner_text(&format!("{:02}:{:02}.{:03}", mins, secs, ms));
+                        }
+                    }
+                    if let Some(window) = web_sys::window() {
+                        if let Some(closure) = cb.borrow().as_ref() {
+                            let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+                        }
+                    }
+                }) as Box<dyn FnMut()>));
+                
+                if let Some(window) = web_sys::window() {
+                    let _ = window.request_animation_frame(cb_clone.borrow().as_ref().unwrap().as_ref().unchecked_ref());
+                }
+            } else {
+                *cb_clone.borrow_mut() = None;
+            }
+            
+            move || {
+                *cb_clone.borrow_mut() = None;
+            }
+        });
+    }
+
+    let on_timeline_mousedown = {
+        let state = props.state.clone();
+        let viewport_ref = viewport_ref.clone();
+        let px_per_second = px_per_second;
+        Callback::from(move |e: MouseEvent| {
+            if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                let rect = viewport.get_bounding_client_rect();
+                let x = e.client_x() as f64 - rect.left() + viewport.scroll_left() as f64;
+                let time = x / px_per_second;
+                state.dispatch(AppAction::Seek((time * 1000.0) as u32));
+            }
+        })
+    };
+
+    let on_keydown = {
+        let state = props.state.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            if e.key() == "Delete" || e.key() == "Backspace" {
+                state.dispatch(AppAction::DeleteSelected);
+            }
+        })
+    };
+
+    let on_mousemove = {
+        let drag_mode = drag_mode.clone();
+        let drag_start_x = drag_start_x.clone();
+        let drag_offset_ms = drag_offset_ms.clone();
+        Callback::from(move |e: MouseEvent| {
+            if drag_mode.is_some() {
+                let delta_x = e.client_x() as f64 - *drag_start_x;
+                let delta_ms = (delta_x / px_per_second * 1000.0) as i32;
+                drag_offset_ms.set(delta_ms);
+            }
+        })
+    };
+
+    let on_mouseup = {
+        let state = props.state.clone();
+        let drag_mode = drag_mode.clone();
+        let drag_offset_ms = drag_offset_ms.clone();
+        let drag_target_id = drag_target_id.clone();
+        Callback::from(move |_| {
+            if let Some(mode) = *drag_mode {
+                let delta = *drag_offset_ms;
+                if delta != 0 {
+                    // Body means shift the selected chunks
+                    // LeftEdge means shift the selected chunks
+                    // RightEdge means shift the next chunks! (But since we didn't implement complex next-chunk shift yet, let's treat Body and LeftEdge identically)
+                    // For now, ShiftSelected shifts all selected chunks.
+                    state.dispatch(AppAction::ShiftSelected(delta));
+                }
+                drag_mode.set(None);
+                drag_offset_ms.set(0);
+                drag_target_id.set(None);
+            }
+        })
+    };
+
+    let on_mouseleave = on_mouseup.clone();
 
     html! {
         <div class="panel timeline-panel">
@@ -216,7 +403,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 }
             }
             <div class="transport-strip">
-                <span class="timecode">{ time_str }</span>
+                <span class="timecode" ref={timecode_ref}>{ time_str }</span>
                 <button class="transport-button" title={if props.state.playing { "Pause" } else { "Play" }} onclick={toggle_play}>
                     if props.state.playing {
                         <svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
@@ -239,8 +426,17 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         </button>
                     </div>
                 </div>
-                <div class="timeline-viewport" tabindex="0">
-                    <div class="timeline-content" style={format!("width: {}px;", width_px)}>
+                <div 
+                    class="timeline-viewport" 
+                    tabindex="0" 
+                    ref={viewport_ref} 
+                    onscroll={on_viewport_scroll}
+                    onkeydown={on_keydown}
+                    onmousemove={on_mousemove}
+                    onmouseup={on_mouseup}
+                    onmouseleave={on_mouseleave}
+                >
+                    <div class="timeline-content" style={format!("width: {}px;", width_px)} onmousedown={on_timeline_mousedown}>
                         <div class="ruler"></div>
                         <div class="track-lane audio-lane">
                             <canvas ref={canvas_ref} class="waveform-canvas"></canvas>
@@ -254,10 +450,18 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             {
                                 if let Some(doc) = &props.state.document {
                                     doc.timeline_chunks(duration_ms).iter().map(|chunk| {
-                                        let start_px = (chunk.start_ms() as f64 / 1000.0) * px_per_second;
-                                        let end_px = (chunk.end_ms() as f64 / 1000.0) * px_per_second;
-                                        let width = (end_px - start_px).max(18.0);
+                                        let mut start_px = (chunk.start_ms() as f64 / 1000.0) * px_per_second;
+                                        let mut end_px = (chunk.end_ms() as f64 / 1000.0) * px_per_second;
+                                        
                                         let is_selected = props.state.selection.contains(chunk.entry_id());
+                                        
+                                        if is_selected && drag_mode.is_some() {
+                                            let offset_px = (*drag_offset_ms as f64 / 1000.0) * px_per_second;
+                                            start_px += offset_px;
+                                            end_px += offset_px;
+                                        }
+
+                                        let width = (end_px - start_px).max(18.0);
                                         let is_current = doc.current_entry(props.state.current_time_ms).map(|e| e.id()) == Some(chunk.entry_id());
                                         
                                         let mut classes = classes!("lyric-chunk");
@@ -268,6 +472,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                             let state = props.state.clone();
                                             let id = chunk.entry_id();
                                             Callback::from(move |e: MouseEvent| {
+                                                e.stop_propagation();
                                                 let mode = if e.shift_key() {
                                                     SelectionMode::Range
                                                 } else if e.ctrl_key() || e.meta_key() {
@@ -279,11 +484,25 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                             })
                                         };
 
+                                        let onmousedown_body = {
+                                            let drag_mode = drag_mode.clone();
+                                            let drag_start_x = drag_start_x.clone();
+                                            let drag_target_id = drag_target_id.clone();
+                                            let id = chunk.entry_id();
+                                            Callback::from(move |e: MouseEvent| {
+                                                e.stop_propagation();
+                                                drag_mode.set(Some(DragMode::Body));
+                                                drag_start_x.set(e.client_x() as f64);
+                                                drag_target_id.set(Some(id));
+                                            })
+                                        };
+
                                         html! {
                                             <div 
                                                 class={classes} 
                                                 style={format!("left: {}px; width: {}px;", start_px, width)}
-                                                {onclick}
+                                                onclick={onclick}
+                                                onmousedown={onmousedown_body}
                                             >
                                                 { chunk.text() }
                                             </div>
@@ -294,19 +513,21 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                 }
                             }
                         </div>
-                        <div class="playhead" style={format!("transform: translateX({}px);", (props.state.current_time_ms as f64 / 1000.0) * px_per_second)}>
+                        <div class="playhead" ref={playhead_ref} style={format!("transform: translateX({}px);", (props.state.current_time_ms as f64 / 1000.0) * px_per_second)}>
                             <span></span>
                         </div>
                     </div>
                 </div>
             </div>
             <div class="timeline-controls">
-                <input type="range" class="timeline-scroll" min="0" max="100" value="0" />
+                <div class="timeline-scroll" ref={scrollbar_ref} onscroll={on_scrollbar_scroll}>
+                    <div style={format!("width: {}px; height: 1px;", width_px)}></div>
+                </div>
                 <div class="zoom-controls">
-                    <button class="icon-button" title="Zoom Out">
+                    <button class="icon-button" title="Zoom Out" onclick={zoom_out}>
                         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
                     </button>
-                    <button class="icon-button" title="Zoom In">
+                    <button class="icon-button" title="Zoom In" onclick={zoom_in}>
                         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
                     </button>
                 </div>
