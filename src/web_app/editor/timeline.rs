@@ -5,12 +5,13 @@ pub struct Interval {
     pub start: u32,
     pub end: u32,
     pub text: String,
+    pub raw_text: String,
     pub id: usize,
     pub is_empty: bool,
 }
 
-pub fn shift_selected(doc: &LrcDocument, selected_ids: &[usize], delta_ms: i32) -> String {
-    let chunks = doc.timeline_chunks(doc.last_entry_time_ms().unwrap_or(0) + 10000);
+pub fn shift_selected(doc: &LrcDocument, selected_ids: &[usize], delta_ms: i32, duration_ms: u32) -> String {
+    let chunks = doc.timeline_chunks(duration_ms);
     
     let mut moved = Vec::new();
     let mut statics = Vec::new();
@@ -20,6 +21,7 @@ pub fn shift_selected(doc: &LrcDocument, selected_ids: &[usize], delta_ms: i32) 
             start: c.start_ms(),
             end: c.end_ms(),
             text: c.text().to_string(),
+            raw_text: c.raw_text().to_string(),
             id: c.entry_id(),
             is_empty: c.is_empty(),
         };
@@ -75,8 +77,8 @@ pub fn shift_selected(doc: &LrcDocument, selected_ids: &[usize], delta_ms: i32) 
     build_lrc(doc, final_intervals)
 }
 
-pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, delta_ms: i32) -> String {
-    let chunks = doc.timeline_chunks(doc.last_entry_time_ms().unwrap_or(0) + 10000);
+pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, delta_ms: i32, duration_ms: u32) -> String {
+    let chunks = doc.timeline_chunks(duration_ms);
     let mut intervals = Vec::new();
     
     let mut boundary_time = None;
@@ -89,6 +91,7 @@ pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, delta
             start: c.start_ms(),
             end: c.end_ms(),
             text: c.text().to_string(),
+            raw_text: c.raw_text().to_string(),
             id: c.entry_id(),
             is_empty: c.is_empty(),
         });
@@ -116,7 +119,7 @@ pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, delta
 
 fn build_lrc(doc: &LrcDocument, final_intervals: Vec<Interval>) -> String {
     let mut resolved = Vec::new();
-    let mut current_time = 0;
+    let mut current_time = final_intervals.first().map(|i| i.start).unwrap_or(0);
 
     for i in final_intervals {
         if i.start > current_time {
@@ -124,6 +127,7 @@ fn build_lrc(doc: &LrcDocument, final_intervals: Vec<Interval>) -> String {
                 start: current_time,
                 end: i.start,
                 text: String::new(),
+                raw_text: String::new(),
                 id: usize::MAX,
                 is_empty: true,
             });
@@ -160,7 +164,7 @@ fn build_lrc(doc: &LrcDocument, final_intervals: Vec<Interval>) -> String {
         let mins = i.start / 60000;
         let secs = (i.start % 60000) / 1000;
         let hund = (i.start % 1000) / 10;
-        text.push_str(&format!("[{:02}:{:02}.{:02}]{}\n", mins, secs, hund, i.text));
+        text.push_str(&format!("[{:02}:{:02}.{:02}]{}\n", mins, secs, hund, i.raw_text));
     }
     
     if let Some(last) = merged.last() {

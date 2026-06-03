@@ -404,37 +404,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         })
     };
 
-    let on_mouseup = {
-        let state = props.state.clone();
-        let drag_mode = drag_mode.clone();
-        let drag_offset_ms = drag_offset_ms.clone();
-        let drag_target_id = drag_target_id.clone();
-        Callback::from(move |_| {
-            if let Some(mode) = *drag_mode {
-                let offset = *drag_offset_ms;
-                if offset != 0 {
-                    match mode {
-                        DragMode::Body => state.dispatch(AppAction::ShiftSelected(offset)),
-                        DragMode::LeftEdge => {
-                            if let Some(id) = *drag_target_id {
-                                state.dispatch(AppAction::ShiftBoundary(id, true, offset));
-                            }
-                        }
-                        DragMode::RightEdge => {
-                            if let Some(id) = *drag_target_id {
-                                state.dispatch(AppAction::ShiftBoundary(id, false, offset));
-                            }
-                        }
-                    }
-                }
-                drag_mode.set(None);
-                drag_offset_ms.set(0);
-                drag_target_id.set(None);
-            }
-        })
-    };
-
-    let on_mouseleave = on_mouseup.clone();
+    // on_global_mouseup handles global mouse ups, so we don't need on_mouseup on the viewport anymore.
 
     let on_scrollbar_mousedown = {
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
@@ -540,8 +510,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     onscroll={on_viewport_scroll}
                     onkeydown={on_keydown}
                     onmousemove={on_mousemove}
-                    onmouseup={on_mouseup}
-                    onmouseleave={on_mouseleave}
                 >
                     <div class="timeline-content" style={format!("width: {}px;", width_px)} onmousedown={on_timeline_mousedown}>
                         <div class="ruler"></div>
@@ -574,22 +542,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                         if is_selected { classes.push("selected"); }
                                         if chunk.is_empty() { classes.push("empty-gap"); }
                                         
-                                        let onclick = {
-                                            let state = props.state.clone();
-                                            let id = chunk.entry_id();
-                                            Callback::from(move |e: MouseEvent| {
-                                                e.stop_propagation();
-                                                let mode = if e.shift_key() {
-                                                    SelectionMode::Range
-                                                } else if e.ctrl_key() || e.meta_key() {
-                                                    SelectionMode::Toggle
-                                                } else {
-                                                    SelectionMode::Replace
-                                                };
-                                                state.dispatch(AppAction::SelectEntry(id, mode));
-                                            })
-                                        };
-
                                         let onmousedown_body = {
                                             let drag_mode = drag_mode.clone();
                                             let drag_start_x = drag_start_x.clone();
@@ -599,9 +551,22 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                             let is_selected = is_selected;
                                             Callback::from(move |e: MouseEvent| {
                                                 e.stop_propagation();
-                                                if !is_selected {
-                                                    state.dispatch(AppAction::SelectEntry(id, SelectionMode::Replace));
+                                                
+                                                let mut mode = SelectionMode::Replace;
+                                                let mut should_select = !is_selected;
+                                                
+                                                if e.shift_key() {
+                                                    mode = SelectionMode::Range;
+                                                    should_select = true;
+                                                } else if e.ctrl_key() || e.meta_key() {
+                                                    mode = SelectionMode::Toggle;
+                                                    should_select = true;
                                                 }
+                                                
+                                                if should_select {
+                                                    state.dispatch(AppAction::SelectEntry(id, mode));
+                                                }
+                                                
                                                 drag_mode.set(Some(DragMode::Body));
                                                 drag_start_x.set(e.client_x() as f64);
                                                 drag_target_id.set(Some(id));
@@ -642,7 +607,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                             <div 
                                                 class={classes} 
                                                 style={format!("left: {}px; width: {}px;", start_px, width)}
-                                                onclick={onclick}
                                                 onmousedown={onmousedown_body}
                                             >
                                                 { chunk.text() }

@@ -149,6 +149,7 @@ impl Reducible for AppState {
                             doc,
                             new_state.selection.selected_ids(),
                             delta_ms,
+                            new_state.duration_ms
                         );
                         
                         new_state.source_text = text.clone();
@@ -171,6 +172,7 @@ impl Reducible for AppState {
                             chunk_id,
                             left_edge,
                             delta_ms,
+                            new_state.duration_ms
                         );
                         
                         new_state.source_text = text.clone();

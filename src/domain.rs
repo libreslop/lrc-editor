@@ -223,6 +223,7 @@ pub struct TimelineChunk {
     start_ms: u32,
     end_ms: u32,
     text: String,
+    raw_text: String,
     is_empty: bool,
 }
 
@@ -245,6 +246,11 @@ impl TimelineChunk {
     /// Visible text on the chunk.
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// The original untrimmed text.
+    pub fn raw_text(&self) -> &str {
+        &self.raw_text
     }
 
     /// Whether this chunk represents an empty gap.
@@ -330,6 +336,7 @@ impl LrcDocument {
                     .get(index + 1)
                     .map_or(duration_ms, LyricEntry::time_ms),
                 text: entry.display_text.clone(),
+                raw_text: entry.text().to_owned(),
                 is_empty: entry.is_empty(),
             })
             .collect()
