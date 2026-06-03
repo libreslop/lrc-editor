@@ -167,7 +167,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         });
     }
 
-    let duration_ms = props.state.duration_ms.max(10_000); 
+    let last_lyric_ms = props.state.document.as_ref().and_then(|doc| doc.last_entry_time_ms()).unwrap_or(0);
+    let duration_ms = props.state.duration_ms.max(last_lyric_ms) + 10000;
     let width_px = (duration_ms as f64 / 1000.0) * px_per_second;
 
     // Draw waveform once duration is set and url is present
@@ -524,16 +525,41 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         <div class="track-lane lyrics-lane">
                             {
                                 if let Some(doc) = &props.state.document {
-                                    doc.timeline_chunks(duration_ms).iter().map(|chunk| {
+                                    doc.timeline_chunks(duration_ms).into_iter().filter(|chunk| !chunk.is_empty()).map(|chunk| {
                                         let mut start_px = (chunk.start_ms() as f64 / 1000.0) * px_per_second;
                                         let mut end_px = (chunk.end_ms() as f64 / 1000.0) * px_per_second;
                                         
                                         let is_selected = props.state.selection.contains(chunk.entry_id());
+                                        let is_drag_target = Some(chunk.entry_id()) == *drag_target_id;
                                         
-                                        if is_selected && drag_mode.is_some() {
+                                        if let Some(mode) = *drag_mode {
                                             let offset_px = (*drag_offset_ms as f64 / 1000.0) * px_per_second;
-                                            start_px += offset_px;
-                                            end_px += offset_px;
+                                            match mode {
+                                                DragMode::Body => {
+                                                    if is_selected {
+                                                        start_px += offset_px;
+                                                        end_px += offset_px;
+                                                    }
+                                                }
+                                                DragMode::LeftEdge => {
+                                                    if let Some(id) = *drag_target_id {
+                                                        if id == chunk.entry_id() {
+                                                            start_px += offset_px;
+                                                        } else if Some(chunk.entry_id()) == doc.previous_entry_id(id) {
+                                                            end_px += offset_px;
+                                                        }
+                                                    }
+                                                }
+                                                DragMode::RightEdge => {
+                                                    if let Some(id) = *drag_target_id {
+                                                        if id == chunk.entry_id() {
+                                                            end_px += offset_px;
+                                                        } else if doc.previous_entry_id(chunk.entry_id()) == Some(id) {
+                                                            start_px += offset_px;
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         let width = (end_px - start_px).max(1.0);

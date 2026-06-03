@@ -145,11 +145,13 @@ impl Reducible for AppState {
             AppAction::ShiftSelected(delta_ms) => {
                 if !new_state.selection.selected_ids().is_empty() && delta_ms != 0 {
                     if let Some(doc) = &new_state.document {
+                        let last_lyric_ms = doc.last_entry_time_ms().unwrap_or(0);
+                        let timeline_duration_ms = new_state.duration_ms.max(last_lyric_ms) + 10000;
                         let text = crate::web_app::editor::timeline::shift_selected(
                             doc,
                             new_state.selection.selected_ids(),
                             delta_ms,
-                            new_state.duration_ms
+                            timeline_duration_ms
                         );
                         
                         new_state.source_text = text.clone();
@@ -167,12 +169,14 @@ impl Reducible for AppState {
             AppAction::ShiftBoundary(chunk_id, left_edge, delta_ms) => {
                 if delta_ms != 0 {
                     if let Some(doc) = &new_state.document {
+                        let last_lyric_ms = doc.last_entry_time_ms().unwrap_or(0);
+                        let timeline_duration_ms = new_state.duration_ms.max(last_lyric_ms) + 10000;
                         let text = crate::web_app::editor::timeline::shift_boundary(
                             doc,
                             chunk_id,
                             left_edge,
                             delta_ms,
-                            new_state.duration_ms
+                            timeline_duration_ms
                         );
                         
                         new_state.source_text = text.clone();
