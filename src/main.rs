@@ -1,6 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 fn main() {
-    lcs_editor::run();
+    lrc_editor::run();
 }
 
 #[cfg(not(target_arch = "wasm32"))]
