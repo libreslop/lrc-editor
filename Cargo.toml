@@ -38,6 +38,7 @@ features = [
     "MouseEvent",
     "Navigator",
     "PointerEvent",
+    "Storage",
     "Url",
     "WheelEvent",
     "Window",
