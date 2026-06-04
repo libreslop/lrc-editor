@@ -22,7 +22,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let lrc_input_ref = use_node_ref();
     let canvas_ref = use_node_ref();
     let viewport_ref = use_node_ref();
-    let scrollbar_ref = use_node_ref();
     let playhead_ref = use_node_ref();
     let timecode_ref = use_node_ref();
     
@@ -127,7 +126,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let document = window.document().unwrap();
             
             let filename = if let Some(audio_name) = &state.audio_filename {
-                // Change extension to .lrc
                 let base = audio_name.rfind('.').map(|i| &audio_name[..i]).unwrap_or(audio_name);
                 format!("{}.lrc", base)
             } else if let Some(lrc_name) = &state.lrc_filename {
@@ -152,7 +150,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         Callback::from(move |e: Event| {
             if let Some(audio) = e.target_dyn_into::<web_sys::HtmlAudioElement>() {
                 state.dispatch(AppAction::SetDuration(TimeMs((audio.duration() * 1000.0) as u32)));
-                // Re-sync audio element to current state time (which might have been clamped by SetDuration)
                 state.dispatch(AppAction::Seek(state.current_time_ms));
             }
         })
@@ -160,9 +157,12 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     let pan_velocity = use_mut_ref(|| 0.0);
     
-    // Keep live references for the RAF loop to avoid stale closures
     let current_time_ms_ref = use_mut_ref(|| props.state.current_time_ms);
     *current_time_ms_ref.borrow_mut() = props.state.current_time_ms;
+
+    let duration_ms = props.state.max_timeline_duration();
+    let width_px = Pixels(duration_ms.to_secs() * px_per_second.as_f64());
+    let audio_width_px = Pixels(props.state.duration_ms.to_secs() * px_per_second.as_f64());
 
     // Drag & Pan loop
     {
@@ -175,6 +175,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let last_mouse_pos = last_mouse_pos.clone();
         let current_time_ms_ref = current_time_ms_ref.clone();
         let suppress_panning = suppress_panning.clone();
+        let scroll_left_state = scroll_left.clone();
 
         use_effect(move || {
             let suppress_panning = suppress_panning.clone();
@@ -186,6 +187,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     let old_scroll = v.scroll_left();
                     if vel != 0.0 && mode.is_some() {
                         v.set_scroll_left(old_scroll + vel as i32);
+                        scroll_left_state.set(v.scroll_left() as f64);
                     }
                     let actual_delta = v.scroll_left() - old_scroll;
                     
@@ -199,7 +201,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         *current_time_ms_ref.borrow_mut() = new_time;
                         state.dispatch(AppAction::SetTime(new_time));
 
-                        // Panning suppression logic
                         let playhead_x = absolute_x;
                         let scroll_left = v.scroll_left() as f64;
                         let client_width = v.client_width() as f64;
@@ -282,18 +283,12 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     
                     if let Some(audio) = audio_ref.cast::<web_sys::HtmlAudioElement>() {
                         let audio_dur_ms = (audio.duration() * 1000.0) as u32;
-                        
-                        // Sync to audio if we are playing and not yet at the very end.
-                        // We stop syncing 200ms before the end to avoid browser "stutter" 
-                        // as it approaches the finish line.
                         if local_current_f64 + 200.0 < audio_dur_ms as f64 && !audio.paused() && !audio.ended() {
                             let audio_time_ms = audio.current_time() * 1000.0;
-                            // Only sync if audio time is reasonable
                             if audio_time_ms > 0.0 || local_current_f64 < 500.0 {
                                 local_current_f64 = audio_time_ms;
                             }
                         } else if local_current_f64 < audio_dur_ms as f64 && audio.paused() && !audio.ended() {
-                            // Try to keep audio playing if we're not at the runway yet
                             if local_current_f64 + 100.0 < audio_dur_ms as f64 {
                                 let _ = audio.play();
                             }
@@ -331,6 +326,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let viewport_ref = viewport_ref.clone();
         let px_per_second = px_per_second;
         let suppress_panning = suppress_panning.clone();
+        let scroll_left_state = scroll_left.clone();
         use_effect_with(last_seek, move |seek| {
             let suppress_panning = suppress_panning.clone();
             if let Some(time_ms) = seek {
@@ -338,7 +334,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     audio.set_current_time(time_ms.to_secs());
                 }
 
-                // Panning check for seeks
                 if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
                     let px = px_per_second.as_f64();
                     let playhead_x = time_ms.to_secs() * px;
@@ -351,6 +346,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
                     if is_off_screen || (is_in_safe_zone && !*suppress_panning) {
                         v.set_scroll_left((playhead_x - client_width / 2.0) as i32);
+                        scroll_left_state.set(v.scroll_left() as f64);
                     }
                 }
             }
@@ -364,15 +360,11 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let playing = props.state.playing;
         let drag_mode = *drag_mode;
         let playhead_ref = playhead_ref.clone();
-        let viewport_ref = viewport_ref.clone();
         let px_per_second = px_per_second;
 
         use_effect_with((current_time_ms, playing, drag_mode, px_per_second), move |(time, playing, mode, px_per_second)| {
             if !*playing && *mode != Some(DragTarget::Playhead) {
-                if let (Some(p), _) = (
-                    playhead_ref.cast::<web_sys::HtmlElement>(),
-                    viewport_ref.cast::<web_sys::HtmlElement>(),
-                ) {
+                if let Some(p) = playhead_ref.cast::<web_sys::HtmlElement>() {
                     let playhead_x = time.to_secs() * px_per_second.as_f64();
                     let _ = p.set_attribute("style", &format!("transform: translateX({}px);", playhead_x));
                 }
@@ -381,36 +373,63 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         });
     }
 
-    let duration_ms = props.state.max_timeline_duration();
-    let width_px = Pixels(duration_ms.to_secs() * px_per_second.as_f64());
-    let audio_width_px = Pixels(props.state.duration_ms.to_secs() * px_per_second.as_f64());
-
     let on_viewport_scroll = {
-        let scrollbar_ref = scrollbar_ref.clone();
         let scroll_left = scroll_left.clone();
         Callback::from(move |e: Event| {
             if let Some(viewport) = e.target_dyn_into::<web_sys::HtmlElement>() {
                 scroll_left.set(viewport.scroll_left() as f64);
-                if let Some(scrollbar) = scrollbar_ref.cast::<web_sys::HtmlElement>() {
-                    if (scrollbar.scroll_left() - viewport.scroll_left()).abs() > 1 {
-                        scrollbar.set_scroll_left(viewport.scroll_left());
-                    }
+            }
+        })
+    };
+
+    let on_wheel = {
+        let state = props.state.clone();
+        let viewport_ref = viewport_ref.clone();
+        let scroll_left_state = scroll_left.clone();
+        let px_per_second_val = 92.0 * props.state.zoom_level;
+        Callback::from(move |e: WheelEvent| {
+            if e.ctrl_key() || e.meta_key() {
+                e.prevent_default();
+                if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                    let rect = vp.get_bounding_client_rect();
+                    let mouse_x = e.client_x() as f64 - rect.left();
+                    let world_x = mouse_x + vp.scroll_left() as f64;
+                    let cursor_time_s = world_x / px_per_second_val;
+                    
+                    let zoom_factor = if e.delta_y() < 0.0 { 1.15 } else { 1.0 / 1.15 };
+                    let new_zoom = (state.zoom_level * zoom_factor).clamp(0.1, 10.0);
+                    let new_px_per_second = 92.0 * new_zoom;
+                    
+                    let new_world_x = cursor_time_s * new_px_per_second;
+                    let new_scroll_left = new_world_x - mouse_x;
+                    
+                    state.dispatch(AppAction::SetZoom(new_zoom));
+                    vp.set_scroll_left(new_scroll_left as i32);
+                    scroll_left_state.set(vp.scroll_left() as f64);
+                }
+            } else if e.shift_key() || e.delta_x() != 0.0 {
+                if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                    let delta = if e.shift_key() { e.delta_y() } else { e.delta_x() };
+                    let new_scroll = vp.scroll_left() as f64 + delta;
+                    vp.set_scroll_left(new_scroll as i32);
+                    scroll_left_state.set(vp.scroll_left() as f64);
                 }
             }
         })
     };
 
-    let on_scrollbar_scroll = {
+    let on_scrollbar_mousedown = {
         let viewport_ref = viewport_ref.clone();
-        let scroll_left = scroll_left.clone();
-        Callback::from(move |e: Event| {
-            if let Some(scrollbar) = e.target_dyn_into::<web_sys::HtmlElement>() {
-                if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                    if (viewport.scroll_left() - scrollbar.scroll_left()).abs() > 1 {
-                        viewport.set_scroll_left(scrollbar.scroll_left());
-                        scroll_left.set(scrollbar.scroll_left() as f64);
-                    }
-                }
+        let total_width = width_px.as_f64();
+        let scroll_left_state = scroll_left.clone();
+        Callback::from(move |e: MouseEvent| {
+            if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                let rect = e.target_unchecked_into::<web_sys::HtmlElement>().get_bounding_client_rect();
+                let click_x = e.client_x() as f64 - rect.left();
+                let ratio = (click_x / rect.width()).clamp(0.0, 1.0);
+                let target_scroll = ratio * total_width - vp.client_width() as f64 / 2.0;
+                vp.set_scroll_left(target_scroll as i32);
+                scroll_left_state.set(vp.scroll_left() as f64);
             }
         })
     };
@@ -452,6 +471,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let viewport_ref = viewport_ref.clone();
         let zoom = state.zoom_level;
         let current_time_ms = state.current_time_ms;
+        let scroll_left_state = scroll_left.clone();
         Callback::from(move |_| {
             let old_px_per_second = 92.0 * zoom;
             let new_zoom = zoom * 1.25;
@@ -470,8 +490,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             
             if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let vp_clone = vp.clone();
+                let scroll_left_state = scroll_left_state.clone();
                 let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
                     vp_clone.set_scroll_left(new_scroll as i32);
+                    scroll_left_state.set(vp_clone.scroll_left() as f64);
                 });
                 let _ = web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(cb.unchecked_ref(), 0);
             }
@@ -483,6 +505,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let viewport_ref = viewport_ref.clone();
         let zoom = state.zoom_level;
         let current_time_ms = state.current_time_ms;
+        let scroll_left_state = scroll_left.clone();
         Callback::from(move |_| {
             let old_px_per_second = 92.0 * zoom;
             let new_zoom = zoom / 1.25;
@@ -501,8 +524,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             
             if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let vp_clone = vp.clone();
+                let scroll_left_state = scroll_left_state.clone();
                 let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
                     vp_clone.set_scroll_left(new_scroll as i32);
+                    scroll_left_state.set(vp_clone.scroll_left() as f64);
                 });
                 let _ = web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(cb.unchecked_ref(), 0);
             }
@@ -519,8 +544,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
         let last_mouse_pos = last_mouse_pos.clone();
         let suppress_panning = suppress_panning.clone();
+        let scroll_left_state = scroll_left.clone();
         
-        // Use the live reference for the RAF loop
         let current_time_ms_ref = current_time_ms_ref.clone();
         
         let px_per_second_ref = use_mut_ref(|| px_per_second);
@@ -540,6 +565,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let last_mouse_pos = last_mouse_pos.clone();
             let is_dragging = *dragging_playhead;
             let suppress_panning = suppress_panning.clone();
+            let scroll_left_state = scroll_left_state.clone();
 
             if *playing || is_dragging {
                 *cb_clone.borrow_mut() = Some(Closure::wrap(Box::new(move || {
@@ -571,15 +597,14 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
                             if !*suppress_panning || is_off_screen {
                                 if world_x > scroll_left + client_width - safe_zone {
-                                    // Pan so playhead is at left safe zone
                                     v.set_scroll_left((world_x - safe_zone) as i32);
+                                    scroll_left_state.set(v.scroll_left() as f64);
                                 } else if world_x < scroll_left + safe_zone {
-                                    // Center if playhead is behind (e.g. after a seek while playing)
                                     v.set_scroll_left((world_x - client_width / 2.0) as i32);
+                                    scroll_left_state.set(v.scroll_left() as f64);
                                 }
                             }
 
-                            // Update suppression logic for playback
                             let hit_right_border = world_x >= scroll_left + client_width - 1.0;
                             if hit_right_border || !is_in_safe_zone {
                                 suppress_panning.set(false);
@@ -656,7 +681,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             drag_start_x.set(Pixels(e.client_x() as f64));
             *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
             
-            // Make playhead jump to cursor immediately
             if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let rect = viewport.get_bounding_client_rect();
                 let x = e.client_x() as f64 - rect.left() + viewport.scroll_left() as f64;
@@ -685,6 +709,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let pan_velocity = pan_velocity.clone();
         let px_per_second = px_per_second;
         let last_mouse_pos = last_mouse_pos.clone();
+        let scroll_left_state = scroll_left.clone();
 
         Callback::from(move |e: MouseEvent| {
             *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
@@ -707,6 +732,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         } else {
                             *pan_velocity.borrow_mut() = 0.0;
                         }
+                        scroll_left_state.set(v.scroll_left() as f64);
                     }
                 } else if mode == DragTarget::Selection {
                     if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
@@ -729,13 +755,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     drag_offset_ms.set(delta_ms);
                 }
             }
-        })
-    };
-
-    let on_scrollbar_mousedown = {
-        let is_scrollbar_dragged = is_scrollbar_dragged.clone();
-        Callback::from(move |_| {
-            *is_scrollbar_dragged.borrow_mut() = true;
         })
     };
 
@@ -796,7 +815,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                 let end_time = TimeMs((((x + w) / px_per_second.as_f64()) * 1000.0) as u32);
                                 
                                 let mode = if e.shift_key() {
-                                    crate::domain::SelectionMode::Add // Fallback for now
+                                    crate::domain::SelectionMode::Add
                                 } else if e.ctrl_key() || e.meta_key() {
                                     crate::domain::SelectionMode::Add
                                 } else {
@@ -822,7 +841,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                     }
                                 }
                                 
-                                // If Replace mode and nothing was in the rect, clear selection
                                 if mode == crate::domain::SelectionMode::Replace && first {
                                     state.dispatch(AppAction::ClearSelection);
                                 }
@@ -888,6 +906,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 on_toggle_play={toggle_play}
                 on_zoom_in={zoom_in}
                 on_zoom_out={zoom_out}
+                scroll_left={*scroll_left}
+                viewport_width={*viewport_width}
+                total_width={width_px.as_f64()}
+                on_scrollbar_mousedown={on_scrollbar_mousedown}
             />
             <div class="timeline-body">
                 <TrackPads 
@@ -912,6 +934,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     drag_offset_ms={*drag_offset_ms}
                     drag_target_id={*drag_target_uid}
                     on_viewport_scroll={on_viewport_scroll}
+                    on_wheel={on_wheel}
                     on_keydown={on_keydown}
                     on_mousemove={on_mousemove}
                     on_mousedown_content={on_timeline_mousedown}
@@ -921,11 +944,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     selection_rect={*selection_rect}
                 />
             </div>
-            <div class="timeline-controls">
-                <div class="timeline-scroll" ref={scrollbar_ref} onscroll={on_scrollbar_scroll} onmousedown={on_scrollbar_mousedown}>
-                    <div style={format!("width: {}px; height: 1px;", width_px.as_f64())}></div>
-                </div>
-            </div>
         </div>
     }
 }
@@ -933,13 +951,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 fn downsample_audio(audio_buffer: web_sys::AudioBuffer) -> WaveformSummary {
     let sample_rate = audio_buffer.sample_rate();
     let data = audio_buffer.get_channel_data(0).unwrap_or_else(|_| vec![0.0]);
-    
-    // Target resolution: 200 bins per second
     let bins_per_second = 200;
     let samples_per_bin = (sample_rate as f64 / bins_per_second as f64).max(1.0) as usize;
-    
     let mut bins = Vec::with_capacity(data.len() / samples_per_bin);
-    
     for i in (0..data.len()).step_by(samples_per_bin) {
         let mut min = 1.0f32;
         let mut max = -1.0f32;
@@ -951,10 +965,5 @@ fn downsample_audio(audio_buffer: web_sys::AudioBuffer) -> WaveformSummary {
         }
         bins.push((min, max));
     }
-    
-    WaveformSummary {
-        bins,
-        samples_per_bin,
-        sample_rate,
-    }
+    WaveformSummary { bins, samples_per_bin, sample_rate }
 }

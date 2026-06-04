@@ -403,7 +403,7 @@ svg {
 
 .timeline-panel {
   display: grid;
-  grid-template-rows: 44px auto 20px;
+  grid-template-rows: 44px auto;
   min-height: 0;
   min-width: 0;
   background: #242930;
@@ -557,8 +557,6 @@ svg {
   position: absolute;
   top: 10px;
   bottom: 10px;
-  left: 10px;
-  width: calc(100% - 20px);
   display: grid;
   place-items: center;
   border: 1px dashed #6d7785;
@@ -568,6 +566,7 @@ svg {
   cursor: pointer;
   font-size: 17px;
   font-weight: 720;
+  z-index: 10;
 }
 
 .import-audio-button:hover {
@@ -575,8 +574,23 @@ svg {
   background: rgba(31, 183, 176, 0.09);
 }
 
-.import-audio-button.loaded {
-  display: none;
+.custom-scrollbar-track {
+  flex: 1;
+  height: 12px;
+  background: #1c2127;
+  border-radius: 6px;
+  position: relative;
+  cursor: pointer;
+  margin: 0 4px;
+}
+
+.custom-scrollbar-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--teal);
+  border-radius: 6px;
+  min-width: 20px;
 }
 
 .lyric-chunk {
@@ -734,31 +748,6 @@ svg {
   clip-path: polygon(50% 100%, 0 0, 100% 0);
 }
 
-.timeline-controls {
-  display: block;
-  padding: 2px 8px 2px calc(var(--track-pad) + 8px);
-  background: #2b3038;
-  min-width: 0;
-}
-
-.timeline-scroll {
-  width: 100%;
-  height: 16px;
-  overflow-x: auto;
-  overflow-y: hidden;
-}
-
-.timeline-scroll::-webkit-scrollbar {
-  height: 12px;
-}
-.timeline-scroll::-webkit-scrollbar-track {
-  background: #1c2127;
-  border-radius: 6px;
-}
-.timeline-scroll::-webkit-scrollbar-thumb {
-  background: var(--teal);
-  border-radius: 6px;
-}
 
 .zoom-controls {
   display: flex;

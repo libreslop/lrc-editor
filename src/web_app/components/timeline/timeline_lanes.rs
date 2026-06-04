@@ -29,6 +29,7 @@ pub struct TimelineLanesProps {
     pub on_mousedown_ruler: Callback<MouseEvent>,
     pub on_import_audio: Callback<MouseEvent>,
     pub on_chunk_drag_start: Callback<(usize, MouseEvent, DragTarget)>,
+    pub on_wheel: Callback<WheelEvent>,
     pub selection_rect: Option<(f64, f64, f64, f64)>,
 }
 
@@ -43,6 +44,7 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
             tabindex="0" 
             ref={props.viewport_ref.clone()} 
             onscroll={props.on_viewport_scroll.clone()}
+            onwheel={props.on_wheel.clone()}
             onkeydown={props.on_keydown.clone()}
             onmousemove={props.on_mousemove.clone()}
         >
@@ -56,10 +58,21 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                         scroll_left={props.scroll_left}
                         viewport_width={props.viewport_width}
                     />
-                    if props.audio_url.is_none() {
-                        <div class="import-audio-button" onclick={props.on_import_audio.clone()}>
-                            { "Import audio" }
-                        </div>
+                    {
+                        if props.audio_url.is_none() {
+                            let import_style = format!(
+                                "left: {}px; width: {}px;",
+                                props.scroll_left + 10.0,
+                                props.viewport_width - 20.0
+                            );
+                            html! {
+                                <div class="import-audio-button" style={import_style} onclick={props.on_import_audio.clone()}>
+                                    { "Import audio" }
+                                </div>
+                            }
+                        } else {
+                            html! {}
+                        }
                     }
                 </div>
                 <div class="track-lane lyrics-lane">
