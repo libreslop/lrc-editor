@@ -25,6 +25,25 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #646d79 #252b32;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #252b32;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #646d79;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #79838f;
 }
 
 [hidden] {
@@ -354,7 +373,6 @@ svg {
   overflow-y: auto;
   scroll-behavior: smooth;
   background: #1d2228;
-  scrollbar-color: #646d79 #252b32;
 }
 
 .lyric-row {
@@ -578,7 +596,6 @@ svg {
   flex: 1;
   height: 12px;
   background: #1c2127;
-  border-radius: 6px;
   position: relative;
   cursor: pointer;
   margin: 0 4px;
@@ -588,8 +605,7 @@ svg {
   position: absolute;
   top: 0;
   bottom: 0;
-  background: var(--teal);
-  border-radius: 6px;
+  background: #646d79;
   min-width: 20px;
 }
 

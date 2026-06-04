@@ -407,9 +407,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     vp.set_scroll_left(new_scroll_left as i32);
                     scroll_left_state.set(vp.scroll_left() as f64);
                 }
-            } else if e.shift_key() || e.delta_x() != 0.0 {
+            } else {
                 if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                    let delta = if e.shift_key() { e.delta_y() } else { e.delta_x() };
+                    e.prevent_default();
+                    let delta = e.delta_y() + e.delta_x();
                     let new_scroll = vp.scroll_left() as f64 + delta;
                     vp.set_scroll_left(new_scroll as i32);
                     scroll_left_state.set(vp.scroll_left() as f64);
