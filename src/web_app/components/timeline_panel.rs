@@ -301,12 +301,14 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let playhead_ref = playhead_ref.clone();
         let viewport_ref = viewport_ref.clone();
         let timecode_ref = timecode_ref.clone();
-        let px_per_second_val = px_per_second;
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
         
-        // Keep a live reference to current_time_ms for the RAF loop
+        // Keep live references for the RAF loop to avoid stale closures
         let current_time_ms_ref = use_mut_ref(|| props.state.current_time_ms);
         *current_time_ms_ref.borrow_mut() = props.state.current_time_ms;
+        
+        let px_per_second_ref = use_mut_ref(|| px_per_second);
+        *px_per_second_ref.borrow_mut() = px_per_second;
 
         use_effect_with(playing, move |playing| {
             use wasm_bindgen::closure::Closure;
@@ -326,7 +328,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         playhead.cast::<web_sys::HtmlElement>(),
                         viewport.cast::<web_sys::HtmlElement>(),
                     ) {
-                        let px = px_per_second_val.as_f64();
+                        let px = px_per_second_ref.borrow().as_f64();
                         let current_time_ms = *current_time_ms_ref.borrow();
                         let playhead_x = current_time_ms.to_secs() * px;
                         let _ = p.set_attribute("style", &format!("transform: translateX({}px);", playhead_x));
