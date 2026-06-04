@@ -163,6 +163,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let current_time_ms_ref = use_mut_ref(|| props.state.current_time_ms);
     *current_time_ms_ref.borrow_mut() = props.state.current_time_ms;
 
+    let px_per_second_ref = use_mut_ref(|| px_per_second);
+    *px_per_second_ref.borrow_mut() = px_per_second;
+
     let duration_ms = props.state.max_timeline_duration();
     let width_px = Pixels(duration_ms.to_secs() * px_per_second.as_f64());
     let audio_width_px = Pixels(props.state.duration_ms.to_secs() * px_per_second.as_f64());
@@ -171,7 +174,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     {
         let pan_velocity = pan_velocity.clone();
         let viewport_ref = viewport_ref.clone();
-        let px_per_second = px_per_second;
+        let px_per_second_ref = px_per_second_ref.clone();
         let drag_mode = drag_mode.clone();
         let state = props.state.clone();
         let drag_offset_ms = drag_offset_ms.clone();
@@ -198,7 +201,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         let rect = v.get_bounding_client_rect();
                         let (mouse_x, _) = *last_mouse_pos.borrow();
                         let absolute_x = mouse_x - rect.left() + v.scroll_left() as f64;
-                        let target_time_ms = (absolute_x / px_per_second.as_f64() * 1000.0) as i32;
+                        let px = px_per_second_ref.borrow().as_f64();
+                        let target_time_ms = (absolute_x / px * 1000.0) as i32;
                         let new_time = TimeMs(target_time_ms.max(0) as u32);
                         
                         *current_time_ms_ref.borrow_mut() = new_time;
@@ -218,7 +222,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             suppress_panning.set(true);
                         }
                     } else if mode.is_some() && actual_delta != 0 {
-                        let delta_ms = (actual_delta as f64 / px_per_second.as_f64() * 1000.0) as i32;
+                        let px = px_per_second_ref.borrow().as_f64();
+                        let delta_ms = (actual_delta as f64 / px * 1000.0) as i32;
                         drag_offset_ms.set(*drag_offset_ms + delta_ms);
                     }
                 }
@@ -663,8 +668,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         
         let current_time_ms_ref = current_time_ms_ref.clone();
         
-        let px_per_second_ref = use_mut_ref(|| px_per_second);
-        *px_per_second_ref.borrow_mut() = px_per_second;
+        let px_per_second_ref = px_per_second_ref.clone();
 
         use_effect_with((playing, dragging_playhead), move |(playing, dragging_playhead)| {
             use wasm_bindgen::closure::Closure;
@@ -673,6 +677,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
             let cb = Rc::new(RefCell::new(None::<Closure<dyn FnMut()>>));
             let cb_clone = cb.clone();
+            
+            let frame_id = Rc::new(RefCell::new(None::<i32>));
+            let frame_id_clone = frame_id.clone();
             
             let playhead = playhead_ref.clone();
             let viewport = viewport_ref.clone();
@@ -736,19 +743,28 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     }
                     if let Some(window) = web_sys::window() {
                         if let Some(closure) = cb.borrow().as_ref() {
-                            let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+                            if let Ok(id) = window.request_animation_frame(closure.as_ref().unchecked_ref()) {
+                                *frame_id_clone.borrow_mut() = Some(id);
+                            }
                         }
                     }
                 }) as Box<dyn FnMut()>));
                 
                 if let Some(window) = web_sys::window() {
-                    let _ = window.request_animation_frame(cb_clone.borrow().as_ref().unwrap().as_ref().unchecked_ref());
+                    if let Ok(id) = window.request_animation_frame(cb_clone.borrow().as_ref().unwrap().as_ref().unchecked_ref()) {
+                        *frame_id.borrow_mut() = Some(id);
+                    }
                 }
             } else {
                 *cb_clone.borrow_mut() = None;
             }
             
             move || {
+                if let Some(window) = web_sys::window() {
+                    if let Some(id) = *frame_id.borrow() {
+                        let _ = window.cancel_animation_frame(id);
+                    }
+                }
                 *cb_clone.borrow_mut() = None;
             }
         });
@@ -822,9 +838,11 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let drag_offset_ms = drag_offset_ms.clone();
         let viewport_ref = viewport_ref.clone();
         let pan_velocity = pan_velocity.clone();
-        let px_per_second = px_per_second;
+        let px_per_second_ref = px_per_second_ref.clone();
         let last_mouse_pos = last_mouse_pos.clone();
         let scroll_left_state = scroll_left.clone();
+        let state = props.state.clone();
+        let current_time_ms_ref = current_time_ms_ref.clone();
 
         let drag_scrollbar_handle_offset = drag_scrollbar_handle_offset.clone();
         let viewport_width = viewport_width.clone();
@@ -852,6 +870,15 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             *pan_velocity.borrow_mut() = 0.0;
                         }
                         scroll_left_state.set(v.scroll_left() as f64);
+
+                        // Immediate, fluid update during scrubbing
+                        let absolute_x = mouse_x - r.left() + v.scroll_left() as f64;
+                        let px = px_per_second_ref.borrow().as_f64();
+                        let target_time_ms = (absolute_x / px * 1000.0) as i32;
+                        let new_time = TimeMs(target_time_ms.max(0) as u32);
+                        
+                        *current_time_ms_ref.borrow_mut() = new_time;
+                        state.dispatch(AppAction::SetTime(new_time));
                     }
                 } else if mode == DragTarget::Selection {
                     if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
@@ -914,7 +941,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         }
                     }
                 } else {
-                    let delta_ms = (delta_x / px_per_second.as_f64() * 1000.0) as i32;
+                    let px = px_per_second_ref.borrow().as_f64();
+                    let delta_ms = (delta_x / px * 1000.0) as i32;
                     drag_offset_ms.set(delta_ms);
                 }
             }
