@@ -517,8 +517,6 @@ svg {
   min-width: 100%;
   height: calc(var(--ruler-height) + var(--audio-height) + var(--lyrics-height));
   background:
-    linear-gradient(to right, rgba(255, 255, 255, 0.07) 1px, transparent 1px) 0 0 /
-      calc(var(--px-per-second) * 1px) 100%,
     linear-gradient(to bottom, transparent var(--ruler-height), rgba(255, 255, 255, 0.05) var(--ruler-height), transparent calc(var(--ruler-height) + 1px)),
     #1c2127;
 }
