@@ -229,12 +229,20 @@ pub fn app() -> Html {
                                 <span class="keybind-key">{"Ctrl + A"}</span>
                             </div>
                             <div class="keybind-item">
+                                <span class="keybind-desc">{"Deselect All"}</span>
+                                <span class="keybind-key">{"Esc"}</span>
+                            </div>
+                            <div class="keybind-item">
                                 <span class="keybind-desc">{"Add to Selection"}</span>
                                 <span class="keybind-key">{"Shift / Ctrl + Click"}</span>
                             </div>
                             <div class="keybind-item">
                                 <span class="keybind-desc">{"Zoom In / Out"}</span>
                                 <span class="keybind-key">{"Ctrl + Wheel"}</span>
+                            </div>
+                            <div class="keybind-item">
+                                <span class="keybind-desc">{"Pan Timeline"}</span>
+                                <span class="keybind-key">{"Wheel"}</span>
                             </div>
                         </div>
                     </div>
