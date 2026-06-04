@@ -114,7 +114,12 @@ impl LrcDocument {
             text.push_str(&format!("[{}:{}]\n", tag.key(), tag.value()));
         }
         for entry in &self.entries {
-            text.push_str(&format!("[{}]{}\n", entry.time_ms().as_timestamp(), entry.text()));
+            let trimmed = entry.text().trim_start();
+            if trimmed.is_empty() {
+                text.push_str(&format!("[{}]\n", entry.time_ms().as_timestamp()));
+            } else {
+                text.push_str(&format!("[{}] {}\n", entry.time_ms().as_timestamp(), trimmed));
+            }
         }
         text
     }

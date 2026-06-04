@@ -285,7 +285,12 @@ impl<'a> TimelineEditor<'a> {
         }
         
         for i in &merged {
-            text.push_str(&format!("[{}]{}\n", i.start.as_timestamp(), i.raw_text));
+            let trimmed = i.raw_text.trim_start();
+            if trimmed.is_empty() {
+                text.push_str(&format!("[{}]\n", i.start.as_timestamp()));
+            } else {
+                text.push_str(&format!("[{}] {}\n", i.start.as_timestamp(), trimmed));
+            }
         }
         
         if let Some(last) = merged.last() {
