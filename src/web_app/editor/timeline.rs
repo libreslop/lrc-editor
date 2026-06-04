@@ -1,5 +1,6 @@
-use crate::domain::{LrcDocument, TimeMs};
+use crate::domain::{LrcDocument, TimeMs, Pixels};
 use crate::web_app::components::timeline::DragTarget;
+use crate::web_app::actions::AppState;
 
 /// Represents an interval of text on the timeline.
 #[derive(Clone, Debug)]
@@ -219,5 +220,158 @@ impl<'a> TimelineEditor<'a> {
         }
 
         text
+    }
+}
+
+/// A utility for calculating snapping positions on the timeline.
+#[derive(Debug)]
+pub struct TimelineSnapper;
+
+impl TimelineSnapper {
+    /// Snaps a playhead time to the nearest chunk boundary or timeline edge if within the visual threshold.
+    pub fn snap_playhead(
+        state: &AppState,
+        target_time: TimeMs,
+        duration_ms: TimeMs,
+        px_per_second: Pixels,
+    ) -> TimeMs {
+        let px_per_ms = px_per_second.as_f64() / 1000.0;
+        let snap_threshold_px = 10.0;
+        let snap_threshold_ms = (snap_threshold_px / px_per_ms) as i32;
+
+        let mut snap_points = Vec::new();
+        snap_points.push(0);
+        snap_points.push(duration_ms.as_u32());
+        snap_points.push(state.playback.duration_ms.as_u32());
+        if let Some(doc) = &state.document.document {
+            let chunks = doc.timeline_chunks(duration_ms);
+            for chunk in chunks {
+                snap_points.push(chunk.start_ms().as_u32());
+                snap_points.push(chunk.end_ms().as_u32());
+            }
+        }
+
+        let target_ms = target_time.as_u32() as i32;
+        let mut best_adjust: Option<i32> = None;
+
+        for p in snap_points {
+            let adjust = p as i32 - target_ms;
+            if best_adjust.is_none() || adjust.abs() < best_adjust.unwrap().abs() {
+                best_adjust = Some(adjust);
+            }
+        }
+
+        if let Some(adjust) = best_adjust {
+            if adjust.abs() <= snap_threshold_ms {
+                return TimeMs((target_ms + adjust).max(0) as u32);
+            }
+        }
+
+        target_time
+    }
+
+    /// Snaps a drag offset delta based on the current drag target and static timeline points.
+    pub fn snap_drag_offset(
+        state: &AppState,
+        drag_mode: DragTarget,
+        drag_target_uid: Option<usize>,
+        raw_offset_ms: i32,
+        duration_ms: TimeMs,
+        px_per_second: Pixels,
+    ) -> i32 {
+        let px_per_ms = px_per_second.as_f64() / 1000.0;
+        let snap_threshold_px = 10.0;
+        let snap_threshold_ms = (snap_threshold_px / px_per_ms) as i32;
+
+        let mut moved_uids = Vec::new();
+        match drag_mode {
+            DragTarget::Body => {
+                moved_uids.extend(state.view.selection.selected_ids());
+            }
+            DragTarget::LeftEdge | DragTarget::RightEdge => {
+                if let Some(uid) = drag_target_uid {
+                    moved_uids.push(uid);
+                }
+            }
+            DragTarget::Boundary => {
+                if let Some(uid) = drag_target_uid {
+                    moved_uids.push(uid);
+                    if let Some(doc) = &state.document.document {
+                        if let Some(next_uid) = doc.next_entry_uid(uid) {
+                            moved_uids.push(next_uid);
+                        }
+                    }
+                }
+            }
+            _ => return raw_offset_ms,
+        }
+
+        // Get static snap points (boundaries of all chunks not currently moving, plus timeline edges, playhead position, and audio end)
+        let mut static_points = Vec::new();
+        static_points.push(0);
+        static_points.push(duration_ms.as_u32());
+        static_points.push(state.playback.current_time_ms.as_u32());
+        static_points.push(state.playback.duration_ms.as_u32());
+        if let Some(doc) = &state.document.document {
+            let chunks = doc.timeline_chunks(duration_ms);
+            for chunk in chunks {
+                if !moved_uids.contains(&chunk.uid()) {
+                    static_points.push(chunk.start_ms().as_u32());
+                    static_points.push(chunk.end_ms().as_u32());
+                }
+            }
+        }
+        static_points.sort();
+        static_points.dedup();
+
+        // Get moving edges that we want to snap
+        let mut moving_edges = Vec::new();
+        if let Some(doc) = &state.document.document {
+            let chunks = doc.timeline_chunks(duration_ms);
+            for chunk in chunks {
+                if moved_uids.contains(&chunk.uid()) {
+                    match drag_mode {
+                        DragTarget::Body => {
+                            moving_edges.push(chunk.start_ms().as_u32() as i32 + raw_offset_ms);
+                            moving_edges.push(chunk.end_ms().as_u32() as i32 + raw_offset_ms);
+                        }
+                        DragTarget::LeftEdge => {
+                            if Some(chunk.uid()) == drag_target_uid {
+                                moving_edges.push(chunk.start_ms().as_u32() as i32 + raw_offset_ms);
+                            }
+                        }
+                        DragTarget::RightEdge => {
+                            if Some(chunk.uid()) == drag_target_uid {
+                                moving_edges.push(chunk.end_ms().as_u32() as i32 + raw_offset_ms);
+                            }
+                        }
+                        DragTarget::Boundary => {
+                            if Some(chunk.uid()) == drag_target_uid {
+                                moving_edges.push(chunk.end_ms().as_u32() as i32 + raw_offset_ms);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        let mut best_adjust: Option<i32> = None;
+        for &edge in &moving_edges {
+            for &p in &static_points {
+                let adjust = p as i32 - edge;
+                if best_adjust.is_none() || adjust.abs() < best_adjust.unwrap().abs() {
+                    best_adjust = Some(adjust);
+                }
+            }
+        }
+
+        if let Some(adjust) = best_adjust {
+            if adjust.abs() <= snap_threshold_ms {
+                return raw_offset_ms + adjust;
+            }
+        }
+
+        raw_offset_ms
     }
 }

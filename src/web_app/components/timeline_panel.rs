@@ -1,7 +1,6 @@
 use yew::prelude::*;
-use web_sys::{HtmlAudioElement, HtmlInputElement, Url, AudioContext, Request, RequestInit, RequestMode, Response};
+use web_sys::HtmlAudioElement;
 use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::{spawn_local, JsFuture};
 use std::rc::Rc;
 use crate::web_app::actions::{AppState, AppAction};
 use crate::domain::{TimeMs, Pixels};
@@ -112,8 +111,15 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         let target_time_ms = (clamped_x / px * 1000.0) as i32;
                         let new_time = TimeMs(target_time_ms.max(0) as u32);
                         
-                        *current_time_ms_ref.borrow_mut() = new_time;
-                        state.dispatch(AppAction::SetTime(new_time));
+                        let snapped_time = crate::web_app::editor::timeline::TimelineSnapper::snap_playhead(
+                            &state,
+                            new_time,
+                            duration_ms,
+                            *px_per_second_ref.borrow(),
+                        );
+                        
+                        *current_time_ms_ref.borrow_mut() = snapped_time;
+                        state.dispatch(AppAction::SetTime(snapped_time));
 
                         let playhead_x = clamped_x;
                         let scroll_left = v.scroll_left() as f64;
@@ -616,7 +622,17 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             
                             let min_x = (v.scroll_left() as f64).max(0.0);
                             let max_x = (v.scroll_left() as f64 + v.client_width() as f64).min(width_px_val);
-                            absolute_x.clamp(min_x, max_x)
+                            let clamped_x = absolute_x.clamp(min_x, max_x);
+
+                            let target_time_ms = (clamped_x / px * 1000.0) as i32;
+                            let new_time = TimeMs(target_time_ms.max(0) as u32);
+                            let snapped_time = crate::web_app::editor::timeline::TimelineSnapper::snap_playhead(
+                                &state,
+                                new_time,
+                                duration_ms,
+                                *px_per_second_ref.borrow(),
+                            );
+                            snapped_time.to_secs() * px
                         } else {
                             current_time_ms.to_secs() * px
                         };
@@ -751,6 +767,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let drag_start_y = drag_start_y.clone();
         let selection_rect = selection_rect.clone();
         let drag_offset_ms = drag_offset_ms.clone();
+        let drag_target_uid = drag_target_uid.clone();
         let viewport_ref = viewport_ref.clone();
         let pan_velocity = pan_velocity.clone();
         let px_per_second_ref = px_per_second_ref.clone();
@@ -798,9 +815,14 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
                         let target_time_ms = (clamped_x / px * 1000.0) as i32;
                         let new_time = TimeMs(target_time_ms.max(0) as u32);
-                        
-                        *current_time_ms_ref.borrow_mut() = new_time;
-                        state.dispatch(AppAction::SetTime(new_time));
+                        let snapped_time = crate::web_app::editor::timeline::TimelineSnapper::snap_playhead(
+                            &state,
+                            new_time,
+                            duration_ms,
+                            *px_per_second_ref.borrow(),
+                        );
+                        *current_time_ms_ref.borrow_mut() = snapped_time;
+                        state.dispatch(AppAction::SetTime(snapped_time));
                     }
                 } else if mode == DragTarget::Selection {
                     if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
@@ -865,7 +887,16 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 } else {
                     let px = px_per_second_ref.borrow().as_f64();
                     let delta_ms = (delta_x / px * 1000.0) as i32;
-                    drag_offset_ms.set(delta_ms);
+                    let duration_ms = state.max_timeline_duration();
+                    let snapped_offset = crate::web_app::editor::timeline::TimelineSnapper::snap_drag_offset(
+                        &state,
+                        mode,
+                        *drag_target_uid,
+                        delta_ms,
+                        duration_ms,
+                        *px_per_second_ref.borrow(),
+                    );
+                    drag_offset_ms.set(snapped_offset);
                 }
             }
         })

@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use crate::domain::{SelectionState, TimeMs};
+use crate::domain::TimeMs;
 use super::components::source_panel::SourcePanel;
 use super::components::preview_panel::PreviewPanel;
 use super::components::timeline_panel::TimelinePanel;
