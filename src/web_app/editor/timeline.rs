@@ -74,7 +74,46 @@ impl<'a> TimelineEditor<'a> {
             is_empty: false,
         };
         
-        let resolved = Self::resolve_overlaps(statics, vec![new_chunk]);
+        let mut resolved = Self::resolve_overlaps(statics, vec![new_chunk]);
+        
+        // Find the color index (0..6) with the furthest neighbors of the same color
+        let mut best_color = 0;
+        let mut max_dist = -1;
+        
+        let non_empty: Vec<&Interval> = resolved.iter().filter(|i| !i.is_empty).collect();
+        if let Some(new_idx) = non_empty.iter().position(|i| i.uid == 0) {
+            for c in 0..6 {
+                let mut left_dist = i32::MAX;
+                for l in (0..new_idx).rev() {
+                    if non_empty[l].color_index == c {
+                        left_dist = (new_idx - l) as i32;
+                        break;
+                    }
+                }
+                
+                let mut right_dist = i32::MAX;
+                for r in (new_idx + 1)..non_empty.len() {
+                    if non_empty[r].color_index == c {
+                        right_dist = (r - new_idx) as i32;
+                        break;
+                    }
+                }
+                
+                let min_dist = left_dist.min(right_dist);
+                if min_dist > max_dist {
+                    max_dist = min_dist;
+                    best_color = c;
+                }
+            }
+        }
+        
+        // Assign the best color to our new chunk
+        for i in &mut resolved {
+            if i.uid == 0 {
+                i.color_index = best_color;
+            }
+        }
+        
         self.build_lrc(resolved)
     }
 

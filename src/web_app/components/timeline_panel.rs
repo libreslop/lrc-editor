@@ -297,10 +297,41 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let on_viewport_scroll = {
         let scroll_left = scroll_left.clone();
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
+        let hover_lyrics_time = hover_lyrics_time.clone();
+        let drag_create_start = drag_create_start.clone();
+        let drag_create_current = drag_create_current.clone();
+        let last_mouse_pos = last_mouse_pos.clone();
+        let px_per_second = px_per_second;
+        let state = props.state.clone();
+
         Callback::from(move |e: Event| {
             if let Some(viewport) = e.target_dyn_into::<web_sys::HtmlElement>() {
                 if !*is_scrollbar_dragged.borrow() {
-                    scroll_left.set(viewport.scroll_left() as f64);
+                    let new_scroll = viewport.scroll_left() as f64;
+                    scroll_left.set(new_scroll);
+
+                    if hover_lyrics_time.is_some() || drag_create_start.is_some() {
+                        let rect = viewport.get_bounding_client_rect();
+                        let mouse_x = last_mouse_pos.borrow().x;
+                        if mouse_x >= rect.left() && mouse_x <= rect.right() {
+                            let x = mouse_x - rect.left() + new_scroll;
+                            let px = px_per_second.as_f64();
+                            let current_time = TimeMs(((x / px) * 1000.0) as u32);
+                            
+                            if drag_create_start.is_some() {
+                                let duration_ms = state.max_timeline_duration();
+                                let snapped_current = crate::web_app::editor::timeline::TimelineSnapper::snap_playhead(
+                                    &state,
+                                    current_time,
+                                    duration_ms,
+                                    px_per_second,
+                                );
+                                drag_create_current.set(Some(snapped_current));
+                            } else {
+                                hover_lyrics_time.set(Some(current_time));
+                            }
+                        }
+                    }
                 }
             }
         })
@@ -833,8 +864,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let viewport_ref = viewport_ref.clone();
         let px_per_second = px_per_second;
         let state = props.state.clone();
+        let last_mouse_pos = last_mouse_pos.clone();
         
         Callback::from(move |e: MouseEvent| {
+            *last_mouse_pos.borrow_mut() = crate::domain::Vec2 { x: e.client_x() as f64, y: e.client_y() as f64 };
             if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let rect = viewport.get_bounding_client_rect();
                 let x = e.client_x() as f64 - rect.left() + viewport.scroll_left() as f64;
