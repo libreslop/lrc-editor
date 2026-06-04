@@ -30,13 +30,13 @@ pub struct TimelineLanesProps {
     pub on_import_audio: Callback<MouseEvent>,
     pub on_chunk_drag_start: Callback<(usize, MouseEvent, DragTarget)>,
     pub on_wheel: Callback<WheelEvent>,
-    pub selection_rect: Option<(f64, f64, f64, f64)>,
+    pub selection_rect: Option<crate::domain::Rect>,
 }
 
 #[function_component(TimelineLanes)]
 pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
     let state = &props.state;
-    let doc = state.document.as_ref();
+    let doc = state.document.document.as_ref();
 
     html! {
         <div 
@@ -80,10 +80,10 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                             let chunks: Vec<crate::web_app::editor::timeline::Interval> = if let Some(mode) = props.drag_mode {
                                 match mode {
                                     DragTarget::Body | DragTarget::LeftEdge | DragTarget::RightEdge | DragTarget::Boundary => {
-                                        crate::web_app::editor::timeline::preview_intervals(
-                                            doc,
+                                        let editor = crate::web_app::editor::timeline::TimelineEditor::new(doc);
+                                        editor.preview_intervals(
                                             props.duration_ms,
-                                            props.state.selection.selected_ids(),
+                                            props.state.view.selection.selected_ids(),
                                             mode,
                                             props.drag_target_id,
                                             props.drag_offset_ms
@@ -118,7 +118,7 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                                 let start_px = Pixels(chunk.start.to_secs() * props.px_per_second.as_f64());
                                 let end_px = Pixels(chunk.end.to_secs() * props.px_per_second.as_f64());
                                 
-                                let is_selected = state.selection.contains(chunk.uid);
+                                let is_selected = state.view.selection.contains(chunk.uid);
                                 let width = Pixels((end_px.as_f64() - start_px.as_f64()).max(1.0));
                                 let chunk_uid = chunk.uid;
                                 let on_drag_start = {
@@ -172,7 +172,7 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                 </div>
             </div>
             {
-                if let Some((x, y, w, h)) = props.selection_rect {
+                if let Some(crate::domain::Rect { x, y, w, h }) = props.selection_rect {
                     html! {
                         <div 
                             class="selection-rect" 

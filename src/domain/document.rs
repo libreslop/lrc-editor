@@ -132,24 +132,22 @@ pub fn reconcile_identity(
 
     // 2. Second pass: text matches (timestamp changed)
     for entry in new_entries.iter_mut() {
-        if entry.uid == 0 {
-            if let Some(pos) = old_entries.iter().position(|e| e.text() == entry.text()) {
+        if entry.uid == 0
+            && let Some(pos) = old_entries.iter().position(|e| e.text() == entry.text()) {
                 let matched = old_entries.remove(pos);
                 entry.uid = matched.uid();
                 entry.color_index = matched.color_index();
             }
-        }
     }
 
     // 3. Third pass: timestamp matches (text changed)
     for entry in new_entries.iter_mut() {
-        if entry.uid == 0 {
-            if let Some(pos) = old_entries.iter().position(|e| e.time_ms() == entry.time_ms()) {
+        if entry.uid == 0
+            && let Some(pos) = old_entries.iter().position(|e| e.time_ms() == entry.time_ms()) {
                 let matched = old_entries.remove(pos);
                 entry.uid = matched.uid();
                 entry.color_index = matched.color_index();
             }
-        }
     }
 
     // 4. Final pass: brand new entries

@@ -18,28 +18,38 @@ pub fn app() -> Html {
         let audio_filename = storage.as_ref().and_then(|s| s.get_item("lrc_audio_filename").ok().flatten());
         let lrc_filename = storage.as_ref().and_then(|s| s.get_item("lrc_lrc_filename").ok().flatten());
 
-        let mut initial_state = AppState {
-            source_text: source_text.clone(),
-            document: None,
-            selection: SelectionState::default(),
-            parse_error: None,
-            current_time_ms,
-            duration_ms: TimeMs(0),
-            playing: false,
-            last_seek_request: None,
-            history: vec![source_text.clone()],
-            history_index: 0,
-            zoom_level: 0.25,
-            next_uid: 1,
-            audio_filename,
-            lrc_filename,
+        let mut state = AppState {
+            document: crate::web_app::actions::DocumentState {
+                source_text: source_text.clone(),
+                document: None,
+                parse_error: None,
+                next_uid: 1,
+            },
+            playback: crate::web_app::actions::PlaybackState {
+                current_time_ms,
+                duration_ms: TimeMs(0),
+                playing: false,
+                last_seek_request: None,
+            },
+            history: crate::web_app::actions::HistoryState {
+                history: vec![source_text.clone()],
+                history_index: 0,
+            },
+            view: crate::web_app::actions::ViewState {
+                zoom_level: 0.25,
+                selection: crate::domain::SelectionState::default(),
+            },
+            project: crate::web_app::actions::ProjectState {
+                audio_filename,
+                lrc_filename,
+            },
         };
         
         if !source_text.is_empty() {
-            initial_state.update_document(source_text);
+            state.update_document(source_text);
         }
         
-        initial_state
+        state
     });
 
     let show_help = use_state(|| false);
@@ -48,7 +58,7 @@ pub fn app() -> Html {
     {
         let state = state.clone();
         use_effect_with(
-            (state.source_text.clone(), state.current_time_ms, state.audio_filename.clone(), state.lrc_filename.clone()),
+            (state.document.source_text.clone(), state.playback.current_time_ms, state.project.audio_filename.clone(), state.project.lrc_filename.clone()),
             move |(source, time, audio, lrc)| {
                 let storage = web_sys::window().and_then(|w| w.local_storage().ok().flatten());
                 if let Some(storage) = storage {
@@ -73,7 +83,7 @@ pub fn app() -> Html {
     {
         let state = state.clone();
         use_effect_with(
-            (state.audio_filename.clone(), state.lrc_filename.clone()),
+            (state.project.audio_filename.clone(), state.project.lrc_filename.clone()),
             move |(audio_name, lrc_name)| {
                 let filename = if let Some(audio_name) = audio_name {
                     let base = audio_name.rfind('.').map(|i| &audio_name[..i]).unwrap_or(audio_name);

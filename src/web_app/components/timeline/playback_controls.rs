@@ -17,10 +17,10 @@ pub struct PlaybackControlsProps {
 #[function_component(PlaybackControls)]
 pub fn playback_controls(props: &PlaybackControlsProps) -> Html {
     let time_str = {
-        let total_secs = props.state.current_time_ms.as_u32() / 1000;
+        let total_secs = props.state.playback.current_time_ms.as_u32() / 1000;
         let mins = total_secs / 60;
         let secs = total_secs % 60;
-        let ms = props.state.current_time_ms.as_u32() % 1000;
+        let ms = props.state.playback.current_time_ms.as_u32() % 1000;
         format!("{:02}:{:02}.{:03}", mins, secs, ms)
     };
 
@@ -43,7 +43,7 @@ pub fn playback_controls(props: &PlaybackControlsProps) -> Html {
     };
 
     let playhead_style = {
-        let current = props.state.current_time_ms.as_u32() as f64;
+        let current = props.state.playback.current_time_ms.as_u32() as f64;
         let total = props.state.max_timeline_duration().as_u32() as f64;
         let ratio = if total > 0.0 { (current / total).clamp(0.0, 1.0) } else { 0.0 };
         format!("left: calc({}% - 1px);", ratio * 100.0)
@@ -52,8 +52,8 @@ pub fn playback_controls(props: &PlaybackControlsProps) -> Html {
     html! {
         <div class="transport-strip">
             <span class="timecode" ref={props.timecode_ref.clone()}>{ time_str }</span>
-            <button class="transport-button" title={if props.state.playing { "Pause" } else { "Play" }} onclick={props.on_toggle_play.clone()}>
-                if props.state.playing {
+            <button class="transport-button" title={if props.state.playback.playing { "Pause" } else { "Play" }} onclick={props.on_toggle_play.clone()}>
+                if props.state.playback.playing {
                     <svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
                 } else {
                     <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>

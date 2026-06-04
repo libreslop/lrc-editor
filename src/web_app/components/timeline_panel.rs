@@ -15,7 +15,7 @@ pub struct TimelinePanelProps {
 
 #[function_component(TimelinePanel)]
 pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
-    let px_per_second = Pixels(92.0 * props.state.zoom_level);
+    let px_per_second = Pixels(92.0 * props.state.view.zoom_level);
     
     let audio_ref = use_node_ref();
     let file_input_ref = use_node_ref();
@@ -34,141 +34,41 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let suppress_panning = use_state(|| false);
     let drag_start_x = use_mut_ref(|| 0.0);
     let drag_start_y = use_state(|| Pixels(0.0));
-    let selection_rect = use_state(|| None::<(f64, f64, f64, f64)>);
+    let selection_rect = use_state(|| None::<crate::domain::Rect>);
     let drag_offset_ms = use_state(|| 0i32);
     let drag_target_uid = use_state(|| None::<usize>);
     let drag_scrollbar_track_left = use_mut_ref(|| 0.0);
     let drag_scrollbar_track_width = use_mut_ref(|| 1.0);
     let drag_scrollbar_handle_offset = use_mut_ref(|| 0.0);
     let is_scrollbar_dragged = use_mut_ref(|| false);
-    let last_mouse_pos = use_mut_ref(|| (0.0, 0.0));
+    let last_mouse_pos = use_mut_ref(|| crate::domain::Vec2 { x: 0.0, y: 0.0 });
 
-    let on_file_change = {
-        let audio_url = audio_url.clone();
-        let waveform_summary = waveform_summary.clone();
-        let state = props.state.clone();
-        Callback::from(move |e: Event| {
-            let input = e.target_unchecked_into::<HtmlInputElement>();
-            if let Some(files) = input.files() {
-                if let Some(file) = files.get(0) {
-                    state.dispatch(AppAction::SetAudioFilename(file.name()));
-                    if let Ok(url) = Url::create_object_url_with_blob(&file) {
-                        audio_url.set(Some(url.clone()));
-                        
-                        let waveform_summary = waveform_summary.clone();
-                        spawn_local(async move {
-                            let opts = RequestInit::new();
-                            opts.set_method("GET");
-                            opts.set_mode(RequestMode::Cors);
-                            let request = Request::new_with_str_and_init(&url, &opts).unwrap();
-                            let window = web_sys::window().unwrap();
-                            
-                            if let Ok(resp_value) = JsFuture::from(window.fetch_with_request(&request)).await {
-                                let resp: Response = resp_value.dyn_into().unwrap();
-                                let array_buffer = JsFuture::from(resp.array_buffer().unwrap()).await.unwrap();
-                                
-                                let audio_ctx = AudioContext::new().unwrap();
-                                let audio_buffer_promise = audio_ctx.decode_audio_data(&array_buffer.into()).unwrap();
-                                if let Ok(audio_buffer_value) = JsFuture::from(audio_buffer_promise).await {
-                                    let audio_buffer: web_sys::AudioBuffer = audio_buffer_value.dyn_into().unwrap();
-                                    waveform_summary.set(Some(Rc::new(downsample_audio(audio_buffer))));
-                                }
-                            }
-                        });
-                    }
-                }
-            }
-        })
-    };
+    let file_handlers = crate::web_app::components::timeline::hooks::use_file_handlers(
+        props.state.clone(),
+        audio_url.clone(),
+        waveform_summary.clone(),
+        file_input_ref.clone(),
+        lrc_input_ref.clone(),
+    );
 
-    let import_click = {
-        let file_input_ref = file_input_ref.clone();
-        Callback::from(move |_| {
-            if let Some(input) = file_input_ref.cast::<HtmlInputElement>() {
-                input.click();
-            }
-        })
-    };
-
-    let import_lrc_click = {
-        let lrc_input_ref = lrc_input_ref.clone();
-        Callback::from(move |_| {
-            if let Some(input) = lrc_input_ref.cast::<HtmlInputElement>() {
-                input.click();
-            }
-        })
-    };
-
-    let on_lrc_change = {
-        let state = props.state.clone();
-        Callback::from(move |e: Event| {
-            let input = e.target_unchecked_into::<HtmlInputElement>();
-            if let Some(files) = input.files() {
-                if let Some(file) = files.get(0) {
-                    state.dispatch(AppAction::SetLrcFilename(file.name()));
-                    let state = state.clone();
-                    spawn_local(async move {
-                        let text_promise = file.text();
-                        if let Ok(text_value) = JsFuture::from(text_promise).await {
-                            if let Some(text) = text_value.as_string() {
-                                state.dispatch(AppAction::UpdateSource(text.clone()));
-                                state.dispatch(AppAction::SaveHistory(text));
-                            }
-                        }
-                    });
-                }
-            }
-        })
-    };
-
-    let export_lrc = {
-        let state = props.state.clone();
-        Callback::from(move |_| {
-            let text = state.source_text.clone();
-            let window = web_sys::window().unwrap();
-            let document = window.document().unwrap();
-            
-            let filename = if let Some(audio_name) = &state.audio_filename {
-                let base = audio_name.rfind('.').map(|i| &audio_name[..i]).unwrap_or(audio_name);
-                format!("{}.lrc", base)
-            } else if let Some(lrc_name) = &state.lrc_filename {
-                lrc_name.clone()
-            } else {
-                "lyrics.lrc".to_string()
-            };
-
-            let blob = web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&text.into())).unwrap();
-            let url = web_sys::Url::create_object_url_with_blob(&blob).unwrap();
-            
-            let a = document.create_element("a").unwrap().dyn_into::<web_sys::HtmlAnchorElement>().unwrap();
-            a.set_href(&url);
-            a.set_download(&filename);
-            a.click();
-            let _ = web_sys::Url::revoke_object_url(&url);
-        })
-    };
-
-    let on_loaded_metadata = {
-        let state = props.state.clone();
-        Callback::from(move |e: Event| {
-            if let Some(audio) = e.target_dyn_into::<web_sys::HtmlAudioElement>() {
-                state.dispatch(AppAction::SetDuration(TimeMs((audio.duration() * 1000.0) as u32)));
-                state.dispatch(AppAction::Seek(state.current_time_ms));
-            }
-        })
-    };
+    let on_file_change = file_handlers.on_file_change;
+    let import_click = file_handlers.import_click;
+    let import_lrc_click = file_handlers.import_lrc_click;
+    let on_lrc_change = file_handlers.on_lrc_change;
+    let export_lrc = file_handlers.export_lrc;
+    let on_loaded_metadata = file_handlers.on_loaded_metadata;
 
     let pan_velocity = use_mut_ref(|| 0.0);
     
-    let current_time_ms_ref = use_mut_ref(|| props.state.current_time_ms);
-    *current_time_ms_ref.borrow_mut() = props.state.current_time_ms;
+    let current_time_ms_ref = use_mut_ref(|| props.state.playback.current_time_ms);
+    *current_time_ms_ref.borrow_mut() = props.state.playback.current_time_ms;
 
     let px_per_second_ref = use_mut_ref(|| px_per_second);
     *px_per_second_ref.borrow_mut() = px_per_second;
 
     let duration_ms = props.state.max_timeline_duration();
     let width_px = Pixels(duration_ms.to_secs() * px_per_second.as_f64());
-    let audio_width_px = Pixels(props.state.duration_ms.to_secs() * px_per_second.as_f64());
+    let audio_width_px = Pixels(props.state.playback.duration_ms.to_secs() * px_per_second.as_f64());
 
     // Drag & Pan loop
     {
@@ -199,7 +99,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     
                     if mode == Some(DragTarget::Playhead) {
                         let rect = v.get_bounding_client_rect();
-                        let (mouse_x, _) = *last_mouse_pos.borrow();
+                        let mouse_x = last_mouse_pos.borrow().x;
                         let absolute_x = mouse_x - rect.left() + v.scroll_left() as f64;
                         let px = px_per_second_ref.borrow().as_f64();
                         let duration_ms = state.max_timeline_duration();
@@ -241,18 +141,18 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     // Playback loop effect
     {
-        let playing = props.state.playing;
+        let playing = props.state.playback.playing;
         let audio_ref = audio_ref.clone();
         let state = props.state.clone();
         
-        let current_time_ref = yew::use_mut_ref(|| props.state.current_time_ms);
-        *current_time_ref.borrow_mut() = props.state.current_time_ms;
+        let current_time_ref = yew::use_mut_ref(|| props.state.playback.current_time_ms);
+        *current_time_ref.borrow_mut() = props.state.playback.current_time_ms;
 
         let bounds_ref = yew::use_mut_ref(|| TimeMs(0));
         *bounds_ref.borrow_mut() = props.state.max_timeline_duration();
 
-        let last_seek_ref = yew::use_mut_ref(|| props.state.last_seek_request);
-        *last_seek_ref.borrow_mut() = props.state.last_seek_request;
+        let last_seek_ref = yew::use_mut_ref(|| props.state.playback.last_seek_request);
+        *last_seek_ref.borrow_mut() = props.state.playback.last_seek_request;
 
         let dragging_playhead = *drag_mode == Some(DragTarget::Playhead);
 
@@ -332,7 +232,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     // Sync seek & Pan
     {
-        let last_seek = props.state.last_seek_request;
+        let last_seek = props.state.playback.last_seek_request;
         let audio_ref = audio_ref.clone();
         let viewport_ref = viewport_ref.clone();
         let px_per_second = px_per_second;
@@ -367,8 +267,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     // Sync playhead visual position when not animating
     {
-        let current_time_ms = props.state.current_time_ms;
-        let playing = props.state.playing;
+        let current_time_ms = props.state.playback.current_time_ms;
+        let playing = props.state.playback.playing;
         let drag_mode = *drag_mode;
         let playhead_ref = playhead_ref.clone();
         let px_per_second = px_per_second;
@@ -400,7 +300,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let state = props.state.clone();
         let viewport_ref = viewport_ref.clone();
         let scroll_left_state = scroll_left.clone();
-        let px_per_second_val = 92.0 * props.state.zoom_level;
+        let px_per_second_val = 92.0 * props.state.view.zoom_level;
         Callback::from(move |e: WheelEvent| {
             if e.ctrl_key() || e.meta_key() {
                 e.prevent_default();
@@ -418,7 +318,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         0.001
                     };
                     let zoom_factor = if e.delta_y() < 0.0 { 1.15 } else { 1.0 / 1.15 };
-                    let new_zoom = (state.zoom_level * zoom_factor).clamp(min_zoom, 10.0);
+                    let new_zoom = (state.view.zoom_level * zoom_factor).clamp(min_zoom, 10.0);
                     let new_px_per_second = 92.0 * new_zoom;
                     
                     let new_world_x = cursor_time_s * new_px_per_second;
@@ -539,7 +439,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     {
         let viewport_ref = viewport_ref.clone();
         let viewport_width = viewport_width.clone();
-        let zoom_level = props.state.zoom_level;
+        let zoom_level = props.state.view.zoom_level;
         let duration = props.state.max_timeline_duration();
         use_effect_with((zoom_level, duration), move |_| {
             if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
@@ -552,7 +452,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     // Auto-clamp zoom level if it is less than the dynamic min_zoom to fit the timeline
     {
         let state = props.state.clone();
-        let zoom_level = props.state.zoom_level;
+        let zoom_level = props.state.view.zoom_level;
         let duration = props.state.max_timeline_duration();
         let viewport_width_val = *viewport_width;
         use_effect_with((zoom_level, duration.as_u32(), viewport_width_val), move |(zl, dur_u32, vw)| {
@@ -580,8 +480,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let zoom_in = {
         let state = props.state.clone();
         let viewport_ref = viewport_ref.clone();
-        let zoom = state.zoom_level;
-        let current_time_ms = state.current_time_ms;
+        let zoom = state.view.zoom_level;
+        let current_time_ms = state.playback.current_time_ms;
         let scroll_left_state = scroll_left.clone();
         let viewport_width = viewport_width.clone();
         Callback::from(move |_| {
@@ -622,8 +522,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let zoom_out = {
         let state = props.state.clone();
         let viewport_ref = viewport_ref.clone();
-        let zoom = state.zoom_level;
-        let current_time_ms = state.current_time_ms;
+        let zoom = state.view.zoom_level;
+        let current_time_ms = state.playback.current_time_ms;
         let scroll_left_state = scroll_left.clone();
         let viewport_width = viewport_width.clone();
         Callback::from(move |_| {
@@ -663,7 +563,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     // Smooth playhead & auto pan
     {
-        let playing = props.state.playing;
+        let playing = props.state.playback.playing;
         let dragging_playhead = *drag_mode == Some(DragTarget::Playhead);
         let playhead_ref = playhead_ref.clone();
         let viewport_ref = viewport_ref.clone();
@@ -709,7 +609,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         let current_time_ms = *current_time_ms_ref.borrow();
                         
                         let playhead_x = if is_dragging {
-                            let (mouse_x, _) = *last_mouse_pos.borrow();
+                            let mouse_x = last_mouse_pos.borrow().x;
                             let absolute_x = mouse_x - rect.left() + v.scroll_left() as f64;
                             let duration_ms = state.max_timeline_duration();
                             let width_px_val = duration_ms.to_secs() * px;
@@ -808,7 +708,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 drag_mode.set(Some(DragTarget::Selection));
                 *drag_start_x.borrow_mut() = x;
                 drag_start_y.set(Pixels(y));
-                *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
+                *last_mouse_pos.borrow_mut() = crate::domain::Vec2 { x: e.client_x() as f64, y: e.client_y() as f64 };
             }
         })
     };
@@ -825,7 +725,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             e.stop_propagation();
             drag_mode.set(Some(DragTarget::Playhead));
             *drag_start_x.borrow_mut() = e.client_x() as f64;
-            *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
+            *last_mouse_pos.borrow_mut() = crate::domain::Vec2 { x: e.client_x() as f64, y: e.client_y() as f64 };
             
             if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let rect = viewport.get_bounding_client_rect();
@@ -864,7 +764,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let width_px_val = width_px.as_f64();
 
         Callback::from(move |e: MouseEvent| {
-            *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
+            *last_mouse_pos.borrow_mut() = crate::domain::Vec2 { x: e.client_x() as f64, y: e.client_y() as f64 };
             
             if let Some(mode) = *drag_mode {
                 let delta_x = e.client_x() as f64 - *drag_start_x.borrow();
@@ -916,7 +816,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         let w = (current_x - start_x).abs();
                         let h = (current_y - start_y).abs();
                         
-                        selection_rect.set(Some((x, y, w, h)));
+                        selection_rect.set(Some(crate::domain::Rect { x, y, w, h }));
                     }
                 } else if mode == DragTarget::Scrollbar {
                     if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
@@ -1027,8 +927,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         state.dispatch(AppAction::Seek(latest_time));
                     }
                     DragTarget::Selection => {
-                        if let Some((x, _y, w, _h)) = *selection_rect {
-                            if let Some(doc) = &state.document {
+                        if let Some(rect) = *selection_rect {
+                            let x = rect.x;
+                            let w = rect.w;
+                            if let Some(doc) = &state.document.document {
                                 let duration = state.max_timeline_duration();
                                 let start_time = TimeMs(((x / px_per_second.as_f64()) * 1000.0) as u32);
                                 let end_time = TimeMs((((x + w) / px_per_second.as_f64()) * 1000.0) as u32);
@@ -1212,7 +1114,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     }
 }
 
-fn downsample_audio(audio_buffer: web_sys::AudioBuffer) -> WaveformSummary {
+pub fn downsample_audio(audio_buffer: web_sys::AudioBuffer) -> WaveformSummary {
     let sample_rate = audio_buffer.sample_rate();
     let data = audio_buffer.get_channel_data(0).unwrap_or_else(|_| vec![0.0]);
     let bins_per_second = 200;

@@ -1,3 +1,4 @@
+pub mod hooks;
 pub mod waveform_canvas;
 pub mod playback_controls;
 pub mod track_pads;

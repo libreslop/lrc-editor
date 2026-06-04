@@ -55,7 +55,7 @@ pub fn preview_panel(props: &PreviewPanelProps) -> Html {
     };
     
     {
-        let current_time_ms = props.state.current_time_ms;
+        let current_time_ms = props.state.playback.current_time_ms;
         let preview_ref = preview_ref.clone();
         let is_autoscroll_active_val = *is_autoscroll_active;
         use_effect_with((current_time_ms, is_autoscroll_active_val), move |(_, is_active)| {
@@ -92,8 +92,8 @@ pub fn preview_panel(props: &PreviewPanelProps) -> Html {
                 ontouchmove={disable_autoscroll_touch} 
             >
                 {
-                    if let Some(doc) = &props.state.document {
-                        let current_entry = doc.current_entry(props.state.current_time_ms);
+                    if let Some(doc) = &props.state.document.document {
+                        let current_entry = doc.current_entry(props.state.playback.current_time_ms);
                         let current_id = current_entry.map(|e| e.id());
                         
                         doc.entries().iter().map(|entry| {

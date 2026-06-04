@@ -42,7 +42,7 @@ pub fn source_panel(props: &SourcePanelProps) -> Html {
         Callback::from(move |_| state.dispatch(AppAction::Redo))
     };
 
-    let invalid_class = if state.parse_error.is_some() { "invalid" } else { "" };
+    let invalid_class = if state.document.parse_error.is_some() { "invalid" } else { "" };
 
     let textarea_ref = use_node_ref();
 
@@ -72,10 +72,10 @@ pub fn source_panel(props: &SourcePanelProps) -> Html {
                         <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                     </button>
                     <div class="button-group">
-                        <button class="icon-button" title="Undo" onclick={undo} disabled={state.history_index == 0}>
+                        <button class="icon-button" title="Undo" onclick={undo} disabled={state.history.history_index == 0}>
                             <svg viewBox="0 0 24 24"><path d="M3 10h10a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H9"/><polyline points="7 6 3 10 7 14"/></svg>
                         </button>
-                        <button class="icon-button" title="Redo" onclick={redo} disabled={state.history_index + 1 >= state.history.len()}>
+                        <button class="icon-button" title="Redo" onclick={redo} disabled={state.history.history_index + 1 >= state.history.history.len()}>
                             <svg viewBox="0 0 24 24"><path d="M21 10H11a5 5 0 0 0-5 5v0a5 5 0 0 0 5 5h4"/><polyline points="17 6 21 10 17 14"/></svg>
                         </button>
                     </div>
@@ -87,14 +87,14 @@ pub fn source_panel(props: &SourcePanelProps) -> Html {
             <textarea 
                 ref={textarea_ref}
                 class={classes!("source-editor", invalid_class)}
-                value={state.source_text.clone()}
+                value={state.document.source_text.clone()}
                 {oninput}
                 {onchange}
                 {onmouseenter}
                 {onmouseleave}
                 spellcheck="false"
             />
-            if let Some(err) = &state.parse_error {
+            if let Some(err) = &state.document.parse_error {
                 <div class="toast">
                     { err }
                 </div>
