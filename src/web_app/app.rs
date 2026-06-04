@@ -19,7 +19,7 @@ pub fn app() -> Html {
         last_seek_request: None,
         history: vec![String::new()],
         history_index: 0,
-        zoom_level: 1.0,
+        zoom_level: 0.25,
     });
 
     {

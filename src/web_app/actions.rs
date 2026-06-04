@@ -53,6 +53,15 @@ impl Clone for AppState {
     }
 }
 
+impl AppState {
+    pub fn max_timeline_duration(&self) -> TimeMs {
+        let last_lyric_ms = self.document.as_ref()
+            .and_then(|doc| doc.last_entry_time_ms())
+            .unwrap_or(TimeMs(0));
+        TimeMs(self.duration_ms.as_u32().max(last_lyric_ms.as_u32()) + 10000)
+    }
+}
+
 impl Reducible for AppState {
     type Action = AppAction;
 
@@ -87,17 +96,32 @@ impl Reducible for AppState {
                 }
             }
             AppAction::SetTime(time) => {
-                new_state.current_time_ms = time;
+                let max_dur = new_state.max_timeline_duration();
+                new_state.current_time_ms = if time.as_u32() > max_dur.as_u32() {
+                    max_dur
+                } else {
+                    time
+                };
             }
             AppAction::SetDuration(time) => {
                 new_state.duration_ms = time;
+                let max_dur = new_state.max_timeline_duration();
+                if new_state.current_time_ms.as_u32() > max_dur.as_u32() {
+                    new_state.current_time_ms = max_dur;
+                }
             }
             AppAction::TogglePlay => {
                 new_state.playing = !new_state.playing;
             }
             AppAction::Seek(time) => {
-                new_state.last_seek_request = Some(time);
-                new_state.current_time_ms = time;
+                let max_dur = new_state.max_timeline_duration();
+                let clamped_time = if time.as_u32() > max_dur.as_u32() {
+                    max_dur
+                } else {
+                    time
+                };
+                new_state.last_seek_request = Some(clamped_time);
+                new_state.current_time_ms = clamped_time;
             }
             AppAction::Undo => {
                 if new_state.history_index > 0 {
@@ -157,8 +181,7 @@ impl Reducible for AppState {
             AppAction::ShiftSelected(delta_ms) => {
                 if !new_state.selection.selected_ids().is_empty() && delta_ms != 0 {
                     if let Some(doc) = &new_state.document {
-                        let last_lyric_ms = doc.last_entry_time_ms().unwrap_or(TimeMs(0));
-                        let timeline_duration_ms = TimeMs(new_state.duration_ms.as_u32().max(last_lyric_ms.as_u32()) + 10000);
+                        let timeline_duration_ms = new_state.max_timeline_duration();
                         let text = crate::web_app::editor::timeline::shift_selected(
                             doc,
                             new_state.selection.selected_ids(),
@@ -181,8 +204,7 @@ impl Reducible for AppState {
             AppAction::ShiftBoundary(chunk_id, left_edge, delta_ms) => {
                 if delta_ms != 0 {
                     if let Some(doc) = &new_state.document {
-                        let last_lyric_ms = doc.last_entry_time_ms().unwrap_or(TimeMs(0));
-                        let timeline_duration_ms = TimeMs(new_state.duration_ms.as_u32().max(last_lyric_ms.as_u32()) + 10000);
+                        let timeline_duration_ms = new_state.max_timeline_duration();
                         let text = crate::web_app::editor::timeline::shift_boundary(
                             doc,
                             chunk_id,
@@ -224,7 +246,7 @@ mod tests {
             last_seek_request: None,
             history: vec![String::new()],
             history_index: 0,
-            zoom_level: 1.0,
+            zoom_level: 0.25,
         })
     }
 
@@ -253,5 +275,19 @@ mod tests {
         
         let clamped = state.reduce(AppAction::SetZoom(100.0));
         assert_eq!(clamped.zoom_level, 10.0);
+    }
+
+    #[test]
+    fn test_duration_clamping() {
+        let state = mock_state();
+        // Default duration is 0, so max_timeline_duration is 10000ms (overscroll)
+        
+        let seek_far = state.clone().reduce(AppAction::Seek(TimeMs(20000)));
+        assert_eq!(seek_far.current_time_ms, TimeMs(10000));
+        
+        let set_dur = state.clone().reduce(AppAction::SetDuration(TimeMs(5000)));
+        // max_timeline_duration becomes 15000ms
+        let seek_edge = set_dur.reduce(AppAction::Seek(TimeMs(15000)));
+        assert_eq!(seek_edge.current_time_ms, TimeMs(15000));
     }
 }

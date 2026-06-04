@@ -87,6 +87,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         Callback::from(move |e: Event| {
             if let Some(audio) = e.target_dyn_into::<web_sys::HtmlAudioElement>() {
                 state.dispatch(AppAction::SetDuration(TimeMs((audio.duration() * 1000.0) as u32)));
+                // Re-sync audio element to current state time (which might have been clamped by SetDuration)
+                state.dispatch(AppAction::Seek(state.current_time_ms));
             }
         })
     };
@@ -308,8 +310,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         });
     }
 
-    let last_lyric_ms = props.state.document.as_ref().and_then(|doc| doc.last_entry_time_ms()).unwrap_or(TimeMs(0));
-    let duration_ms = TimeMs(props.state.duration_ms.as_u32().max(last_lyric_ms.as_u32()) + 10000);
+    let duration_ms = props.state.max_timeline_duration();
     let width_px = Pixels(duration_ms.to_secs() * px_per_second.as_f64());
     let audio_width_px = Pixels(props.state.duration_ms.to_secs() * px_per_second.as_f64());
 

@@ -31,13 +31,6 @@ pub fn preview_panel(props: &PreviewPanelProps) -> Html {
             is_autoscroll_active.set(false);
         })
     };
-    let disable_autoscroll_key = {
-        let is_autoscroll_active = is_autoscroll_active.clone();
-        Callback::from(move |_: KeyboardEvent| {
-            is_autoscroll_active.set(false);
-        })
-    };
-
     let resume_autoscroll = {
         let is_autoscroll_active = is_autoscroll_active.clone();
         Callback::from(move |_| {
@@ -82,7 +75,6 @@ pub fn preview_panel(props: &PreviewPanelProps) -> Html {
                 onwheel={disable_autoscroll_wheel} 
                 onmousedown={disable_autoscroll_mouse}
                 ontouchmove={disable_autoscroll_touch} 
-                onkeydown={disable_autoscroll_key}
             >
                 {
                     if let Some(doc) = &props.state.document {
@@ -101,12 +93,16 @@ pub fn preview_panel(props: &PreviewPanelProps) -> Html {
                                 })
                             };
 
+                            let onmousedown = Callback::from(|e: MouseEvent| {
+                                e.stop_propagation();
+                            });
+
                             let mut classes = classes!("lyric-row");
                             if is_active { classes.push("active"); }
                             if is_empty { classes.push("empty"); }
 
                             html! {
-                                <button class={classes} {onclick}>
+                                <button class={classes} {onclick} {onmousedown} tabindex="-1">
                                     <span class="lyric-time">{ entry.timestamp() }</span>
                                     <span class="lyric-text">{ 
                                         if is_empty { "[Empty]" } else { entry.text() } 
