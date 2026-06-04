@@ -28,7 +28,7 @@ impl LyricEntry {
         self.uid
     }
 
-    /// Color index (0-3) for visual distinction.
+    /// Color index (0-7) for visual distinction.
     pub fn color_index(&self) -> u8 {
         self.color_index
     }

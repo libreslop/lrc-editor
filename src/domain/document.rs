@@ -165,14 +165,11 @@ pub fn reconcile_identity(
                 None
             };
             
-            let mut best_color = 0;
-            for c in 0..4 {
-                if Some(c) != prev_color && Some(c) != next_color {
-                    best_color = c;
-                    break;
-                }
+            let mut best_color = (prev_color.map(|c| c as usize).unwrap_or(7) + 1) % 8;
+            if Some(best_color as u8) == next_color {
+                best_color = (best_color + 1) % 8;
             }
-            new_entries[i].color_index = best_color;
+            new_entries[i].color_index = best_color as u8;
         }
     }
 }

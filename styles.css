@@ -15,7 +15,7 @@
   --green: #76c76c;
   --red: #ff4b55;
   --selection: #8b68f6;
-  --track-pad: 76px;
+  --track-pad: 48px;
   --ruler-height: 28px;
   --audio-height: 104px;
   --lyrics-height: 82px;
@@ -380,8 +380,8 @@ svg {
   padding: 0 4px;
 }
 
-.track-pad.side-by-side {
-  flex-direction: row;
+.track-pad.stacked {
+  flex-direction: column;
   gap: 4px;
 }
 
@@ -502,7 +502,7 @@ svg {
   height: 54px;
   min-width: 4px;
   overflow: hidden;
-  padding: 7px 4px 0;
+  padding: 7px 8px 0;
   border: 1px solid rgba(119, 62, 66, 0.78);
   border-radius: var(--radius);
   background: var(--coral);
@@ -514,7 +514,7 @@ svg {
   text-overflow: ellipsis;
   white-space: nowrap;
   box-shadow: inset 0 -18px 0 rgba(0, 0, 0, 0.08);
-  text-align: center;
+  text-align: left;
 }
 
 .lyric-chunk.color-0 {
@@ -535,6 +535,26 @@ svg {
 .lyric-chunk.color-3 {
   background: #41b59f;
   border-color: rgba(32, 91, 81, 0.8);
+}
+
+.lyric-chunk.color-4 {
+  background: #4b89df;
+  border-color: rgba(41, 74, 116, 0.8);
+}
+
+.lyric-chunk.color-5 {
+  background: #8e62df;
+  border-color: rgba(73, 50, 116, 0.8);
+}
+
+.lyric-chunk.color-6 {
+  background: #df62a6;
+  border-color: rgba(116, 50, 87, 0.8);
+}
+
+.lyric-chunk.color-7 {
+  background: #8994a5;
+  border-color: rgba(69, 74, 83, 0.8);
 }
 
 .lyric-chunk.selected {

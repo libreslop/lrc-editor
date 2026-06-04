@@ -4,6 +4,8 @@ use crate::domain::{LrcDocument, LrcParser, SelectionState, SelectionMode, TimeM
 
 pub enum AppAction {
     UpdateSource(String),
+    SetLrcFilename(String),
+    SetAudioFilename(String),
     SelectEntry(usize, SelectionMode),
     ClearSelection,
     SelectAll,
@@ -34,6 +36,8 @@ pub struct AppState {
     pub history_index: usize,
     pub zoom_level: f64,
     pub next_uid: usize,
+    pub audio_filename: Option<String>,
+    pub lrc_filename: Option<String>,
 }
 
 impl Clone for AppState {
@@ -51,6 +55,8 @@ impl Clone for AppState {
             history_index: self.history_index,
             zoom_level: self.zoom_level,
             next_uid: self.next_uid,
+            audio_filename: self.audio_filename.clone(),
+            lrc_filename: self.lrc_filename.clone(),
         }
     }
 }
@@ -92,6 +98,12 @@ impl Reducible for AppState {
         match action {
             AppAction::UpdateSource(source) => {
                 new_state.update_document(source);
+            }
+            AppAction::SetLrcFilename(name) => {
+                new_state.lrc_filename = Some(name);
+            }
+            AppAction::SetAudioFilename(name) => {
+                new_state.audio_filename = Some(name);
             }
             AppAction::SelectEntry(id, mode) => {
                 if let Some(doc) = &new_state.document {
@@ -262,6 +274,8 @@ mod tests {
             history_index: 0,
             zoom_level: 0.25,
             next_uid: 1,
+            audio_filename: None,
+            lrc_filename: None,
         })
     }
 

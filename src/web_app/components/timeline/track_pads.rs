@@ -17,7 +17,7 @@ pub fn track_pads(props: &TrackPadsProps) -> Html {
                     <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 </button>
             </div>
-            <div class="track-pad lyrics-pad side-by-side">
+            <div class="track-pad lyrics-pad stacked">
                 <button class="icon-button track-button" title="Import LRC" onclick={props.on_import_lrc.clone()}>
                     <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 </button>

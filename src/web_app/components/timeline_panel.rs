@@ -44,10 +44,12 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let on_file_change = {
         let audio_url = audio_url.clone();
         let waveform_summary = waveform_summary.clone();
+        let state = props.state.clone();
         Callback::from(move |e: Event| {
             let input = e.target_unchecked_into::<HtmlInputElement>();
             if let Some(files) = input.files() {
                 if let Some(file) = files.get(0) {
+                    state.dispatch(AppAction::SetAudioFilename(file.name()));
                     if let Ok(url) = Url::create_object_url_with_blob(&file) {
                         audio_url.set(Some(url.clone()));
                         
@@ -101,6 +103,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let input = e.target_unchecked_into::<HtmlInputElement>();
             if let Some(files) = input.files() {
                 if let Some(file) = files.get(0) {
+                    state.dispatch(AppAction::SetLrcFilename(file.name()));
                     let state = state.clone();
                     spawn_local(async move {
                         let text_promise = file.text();
@@ -122,12 +125,23 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let text = state.source_text.clone();
             let window = web_sys::window().unwrap();
             let document = window.document().unwrap();
+            
+            let filename = if let Some(audio_name) = &state.audio_filename {
+                // Change extension to .lrc
+                let base = audio_name.rfind('.').map(|i| &audio_name[..i]).unwrap_or(audio_name);
+                format!("{}.lrc", base)
+            } else if let Some(lrc_name) = &state.lrc_filename {
+                lrc_name.clone()
+            } else {
+                "lyrics.lrc".to_string()
+            };
+
             let blob = web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&text.into())).unwrap();
             let url = web_sys::Url::create_object_url_with_blob(&blob).unwrap();
             
             let a = document.create_element("a").unwrap().dyn_into::<web_sys::HtmlAnchorElement>().unwrap();
             a.set_href(&url);
-            a.set_download("lyrics.lrc");
+            a.set_download(&filename);
             a.click();
             let _ = web_sys::Url::revoke_object_url(&url);
         })

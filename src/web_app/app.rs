@@ -21,6 +21,8 @@ pub fn app() -> Html {
         history_index: 0,
         zoom_level: 0.25,
         next_uid: 1,
+        audio_filename: None,
+        lrc_filename: None,
     });
 
     {
