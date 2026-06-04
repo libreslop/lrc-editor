@@ -42,6 +42,13 @@ pub fn playback_controls(props: &PlaybackControlsProps) -> Html {
         "width: 100%; left: 0%;".to_string()
     };
 
+    let playhead_style = {
+        let current = props.state.current_time_ms.as_u32() as f64;
+        let total = props.state.max_timeline_duration().as_u32() as f64;
+        let ratio = if total > 0.0 { (current / total).clamp(0.0, 1.0) } else { 0.0 };
+        format!("left: calc({}% - 1px);", ratio * 100.0)
+    };
+
     html! {
         <div class="transport-strip">
             <span class="timecode" ref={props.timecode_ref.clone()}>{ time_str }</span>
@@ -54,6 +61,7 @@ pub fn playback_controls(props: &PlaybackControlsProps) -> Html {
             </button>
             
             <div class="custom-scrollbar-track" onmousedown={props.on_scrollbar_mousedown.clone()}>
+                <div class="custom-scrollbar-playhead-marker" style={playhead_style}></div>
                 <div class="custom-scrollbar-handle" style={scroll_handle_style}></div>
             </div>
 

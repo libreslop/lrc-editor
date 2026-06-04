@@ -607,6 +607,16 @@ svg {
   min-width: 20px;
 }
 
+.custom-scrollbar-playhead-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ff4a4a;
+  z-index: 2;
+  pointer-events: none;
+}
+
 .lyric-chunk {
   position: absolute;
   top: 13px;
