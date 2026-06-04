@@ -202,13 +202,20 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         let (mouse_x, _) = *last_mouse_pos.borrow();
                         let absolute_x = mouse_x - rect.left() + v.scroll_left() as f64;
                         let px = px_per_second_ref.borrow().as_f64();
-                        let target_time_ms = (absolute_x / px * 1000.0) as i32;
+                        let duration_ms = state.max_timeline_duration();
+                        let width_px_val = duration_ms.to_secs() * px;
+
+                        let min_x = (v.scroll_left() as f64).max(0.0);
+                        let max_x = (v.scroll_left() as f64 + v.client_width() as f64).min(width_px_val);
+                        let clamped_x = absolute_x.clamp(min_x, max_x);
+
+                        let target_time_ms = (clamped_x / px * 1000.0) as i32;
                         let new_time = TimeMs(target_time_ms.max(0) as u32);
                         
                         *current_time_ms_ref.borrow_mut() = new_time;
                         state.dispatch(AppAction::SetTime(new_time));
 
-                        let playhead_x = absolute_x;
+                        let playhead_x = clamped_x;
                         let scroll_left = v.scroll_left() as f64;
                         let client_width = v.client_width() as f64;
                         let safe_zone = 90.0;
@@ -669,6 +676,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let current_time_ms_ref = current_time_ms_ref.clone();
         
         let px_per_second_ref = px_per_second_ref.clone();
+        let state = props.state.clone();
 
         use_effect_with((playing, dragging_playhead), move |(playing, dragging_playhead)| {
             use wasm_bindgen::closure::Closure;
@@ -688,6 +696,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let is_dragging = *dragging_playhead;
             let suppress_panning = suppress_panning.clone();
             let scroll_left_state = scroll_left_state.clone();
+            let state = state.clone();
 
             if *playing || is_dragging {
                 *cb_clone.borrow_mut() = Some(Closure::wrap(Box::new(move || {
@@ -701,7 +710,13 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         
                         let playhead_x = if is_dragging {
                             let (mouse_x, _) = *last_mouse_pos.borrow();
-                            mouse_x - rect.left() + v.scroll_left() as f64
+                            let absolute_x = mouse_x - rect.left() + v.scroll_left() as f64;
+                            let duration_ms = state.max_timeline_duration();
+                            let width_px_val = duration_ms.to_secs() * px;
+                            
+                            let min_x = (v.scroll_left() as f64).max(0.0);
+                            let max_x = (v.scroll_left() as f64 + v.client_width() as f64).min(width_px_val);
+                            absolute_x.clamp(min_x, max_x)
                         } else {
                             current_time_ms.to_secs() * px
                         };
@@ -872,9 +887,16 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         scroll_left_state.set(v.scroll_left() as f64);
 
                         // Immediate, fluid update during scrubbing
-                        let absolute_x = mouse_x - r.left() + v.scroll_left() as f64;
                         let px = px_per_second_ref.borrow().as_f64();
-                        let target_time_ms = (absolute_x / px * 1000.0) as i32;
+                        let duration_ms = state.max_timeline_duration();
+                        let width_px_val = duration_ms.to_secs() * px;
+
+                        let absolute_x = mouse_x - r.left() + v.scroll_left() as f64;
+                        let min_x = (v.scroll_left() as f64).max(0.0);
+                        let max_x = (v.scroll_left() as f64 + v.client_width() as f64).min(width_px_val);
+                        let clamped_x = absolute_x.clamp(min_x, max_x);
+
+                        let target_time_ms = (clamped_x / px * 1000.0) as i32;
                         let new_time = TimeMs(target_time_ms.max(0) as u32);
                         
                         *current_time_ms_ref.borrow_mut() = new_time;
@@ -960,6 +982,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let px_per_second = px_per_second;
         let viewport_ref = viewport_ref.clone();
         let scroll_left = scroll_left.clone();
+        let suppress_panning = suppress_panning.clone();
+        let current_time_ms_ref = current_time_ms_ref.clone();
         
         Callback::from(move |e: MouseEvent| {
             *is_scrollbar_dragged.borrow_mut() = false;
@@ -998,7 +1022,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         }
                     }
                     DragTarget::Playhead => {
-                        state.dispatch(AppAction::Seek(state.current_time_ms));
+                        suppress_panning.set(true);
+                        let latest_time = *current_time_ms_ref.borrow();
+                        state.dispatch(AppAction::Seek(latest_time));
                     }
                     DragTarget::Selection => {
                         if let Some((x, _y, w, _h)) = *selection_rect {
