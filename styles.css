@@ -731,7 +731,7 @@ svg {
   left: 0;
   width: 0;
   pointer-events: none;
-  z-index: 8;
+  z-index: 20;
 }
 
 .playhead::before {

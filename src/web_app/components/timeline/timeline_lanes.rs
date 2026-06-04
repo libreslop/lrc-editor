@@ -47,7 +47,7 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
             onwheel={props.on_wheel.clone()}
             onkeydown={props.on_keydown.clone()}
         >
-            <div class="timeline-content" style={format!("width: {}px;", props.width_px.as_f64())} onmousedown={props.on_mousedown_content.clone()}>
+            <div class="timeline-content" style={format!("width: {}px; --px-per-second: {};", props.width_px.as_f64(), props.px_per_second.as_f64())} onmousedown={props.on_mousedown_content.clone()}>
                 <div class="ruler" onmousedown={props.on_mousedown_ruler.clone()}></div>
                 <div class="track-lane audio-lane">
                     <WaveformCanvas 

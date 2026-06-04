@@ -29,7 +29,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let waveform_summary = use_state(|| None::<Rc<WaveformSummary>>);
     let scroll_left = use_state(|| 0.0);
     let viewport_width = use_state(|| 0.0);
-    let scroll_width = use_state(|| 0.0);
 
     let drag_mode = use_state(|| None::<DragTarget>);
     let suppress_panning = use_state(|| false);
@@ -375,14 +374,12 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     let on_viewport_scroll = {
         let scroll_left = scroll_left.clone();
-        let scroll_width = scroll_width.clone();
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
         Callback::from(move |e: Event| {
             if let Some(viewport) = e.target_dyn_into::<web_sys::HtmlElement>() {
                 if !*is_scrollbar_dragged.borrow() {
                     scroll_left.set(viewport.scroll_left() as f64);
                 }
-                scroll_width.set(viewport.scroll_width() as f64);
             }
         })
     };
@@ -401,8 +398,15 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     let world_x = mouse_x + vp.scroll_left() as f64;
                     let cursor_time_s = world_x / px_per_second_val;
                     
+                    let vp_width = rect.width();
+                    let dur_secs = duration_ms.to_secs();
+                    let min_zoom = if vp_width > 0.0 && dur_secs > 0.0 {
+                        vp_width / (dur_secs * 92.0)
+                    } else {
+                        0.001
+                    };
                     let zoom_factor = if e.delta_y() < 0.0 { 1.15 } else { 1.0 / 1.15 };
-                    let new_zoom = (state.zoom_level * zoom_factor).clamp(0.1, 10.0);
+                    let new_zoom = (state.zoom_level * zoom_factor).clamp(min_zoom, 10.0);
                     let new_px_per_second = 92.0 * new_zoom;
                     
                     let new_world_x = cursor_time_s * new_px_per_second;
@@ -427,13 +431,13 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let on_scrollbar_mousedown = {
         let viewport_ref = viewport_ref.clone();
         let viewport_width = viewport_width.clone();
-        let scroll_width = scroll_width.clone();
         let scroll_left_state = scroll_left.clone();
         let drag_mode = drag_mode.clone();
         let drag_scrollbar_track_left = drag_scrollbar_track_left.clone();
         let drag_scrollbar_track_width = drag_scrollbar_track_width.clone();
         let drag_scrollbar_handle_offset = drag_scrollbar_handle_offset.clone();
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
+        let width_px_val = width_px.as_f64();
 
         Callback::from(move |e: MouseEvent| {
             if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
@@ -448,9 +452,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 let is_handle = target.class_list().contains("custom-scrollbar-handle");
 
                 let vp_width = vp.client_width() as f64;
-                let vp_scroll_width = vp.scroll_width() as f64;
+                let vp_scroll_width = width_px_val;
                 viewport_width.set(vp_width);
-                scroll_width.set(vp_scroll_width);
 
                 if is_handle {
                     let handle_rect = target.get_bounding_client_rect();
@@ -498,15 +501,12 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     {
         let viewport_ref = viewport_ref.clone();
         let viewport_width = viewport_width.clone();
-        let scroll_width = scroll_width.clone();
         use_effect_with((), move |_| {
             let vw_clone = viewport_width.clone();
-            let sw_clone = scroll_width.clone();
             let vr_clone = viewport_ref.clone();
             let listener = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
                 if let Some(v) = vr_clone.cast::<web_sys::HtmlElement>() {
                     vw_clone.set(v.client_width() as f64);
-                    sw_clone.set(v.scroll_width() as f64);
                 }
             }) as Box<dyn FnMut()>);
             
@@ -515,7 +515,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             
             if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 viewport_width.set(v.client_width() as f64);
-                scroll_width.set(v.scroll_width() as f64);
             }
             
             move || {
@@ -528,13 +527,32 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     {
         let viewport_ref = viewport_ref.clone();
         let viewport_width = viewport_width.clone();
-        let scroll_width = scroll_width.clone();
         let zoom_level = props.state.zoom_level;
         let duration = props.state.max_timeline_duration();
         use_effect_with((zoom_level, duration), move |_| {
             if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 viewport_width.set(v.client_width() as f64);
-                scroll_width.set(v.scroll_width() as f64);
+            }
+            || ()
+        });
+    }
+
+    // Auto-clamp zoom level if it is less than the dynamic min_zoom to fit the timeline
+    {
+        let state = props.state.clone();
+        let zoom_level = props.state.zoom_level;
+        let duration = props.state.max_timeline_duration();
+        let viewport_width_val = *viewport_width;
+        use_effect_with((zoom_level, duration.as_u32(), viewport_width_val), move |(zl, dur_u32, vw)| {
+            let vw_val = *vw;
+            if vw_val > 0.0 {
+                let dur_secs = *dur_u32 as f64 / 1000.0;
+                if dur_secs > 0.0 {
+                    let min_zoom = vw_val / (dur_secs * 92.0);
+                    if *zl < min_zoom - 0.0001 {
+                        state.dispatch(AppAction::SetZoom(min_zoom));
+                    }
+                }
             }
             || ()
         });
@@ -553,9 +571,17 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let zoom = state.zoom_level;
         let current_time_ms = state.current_time_ms;
         let scroll_left_state = scroll_left.clone();
+        let viewport_width = viewport_width.clone();
         Callback::from(move |_| {
+            let vp_width = *viewport_width;
+            let dur_secs = state.max_timeline_duration().to_secs();
+            let min_zoom = if vp_width > 0.0 && dur_secs > 0.0 {
+                vp_width / (dur_secs * 92.0)
+            } else {
+                0.001
+            };
             let old_px_per_second = 92.0 * zoom;
-            let new_zoom = zoom * 1.25;
+            let new_zoom = (zoom * 1.25).clamp(min_zoom, 10.0);
             let new_px_per_second = 92.0 * new_zoom;
             let playhead_x_old = current_time_ms.to_secs() * old_px_per_second;
             let playhead_x_new = current_time_ms.to_secs() * new_px_per_second;
@@ -587,9 +613,17 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let zoom = state.zoom_level;
         let current_time_ms = state.current_time_ms;
         let scroll_left_state = scroll_left.clone();
+        let viewport_width = viewport_width.clone();
         Callback::from(move |_| {
+            let vp_width = *viewport_width;
+            let dur_secs = state.max_timeline_duration().to_secs();
+            let min_zoom = if vp_width > 0.0 && dur_secs > 0.0 {
+                vp_width / (dur_secs * 92.0)
+            } else {
+                0.001
+            };
             let old_px_per_second = 92.0 * zoom;
-            let new_zoom = zoom / 1.25;
+            let new_zoom = (zoom / 1.25).clamp(min_zoom, 10.0);
             let new_px_per_second = 92.0 * new_zoom;
             let playhead_x_old = current_time_ms.to_secs() * old_px_per_second;
             let playhead_x_new = current_time_ms.to_secs() * new_px_per_second;
@@ -794,7 +828,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
         let drag_scrollbar_handle_offset = drag_scrollbar_handle_offset.clone();
         let viewport_width = viewport_width.clone();
-        let scroll_width = scroll_width.clone();
+        let width_px_val = width_px.as_f64();
 
         Callback::from(move |e: MouseEvent| {
             *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
@@ -804,15 +838,15 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 
                 if mode == DragTarget::Playhead {
                     if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                        let rect = v.get_bounding_client_rect();
+                        let r = v.get_bounding_client_rect();
                         let mouse_x = e.client_x() as f64;
                         
                         let safe_zone = 90.0;
-                        if mouse_x < rect.left() + safe_zone {
-                            let ratio = (rect.left() + safe_zone - mouse_x) / safe_zone;
+                        if mouse_x < r.left() + safe_zone {
+                            let ratio = (r.left() + safe_zone - mouse_x) / safe_zone;
                             *pan_velocity.borrow_mut() = -10.0 * ratio.min(1.0);
-                        } else if mouse_x > rect.right() - safe_zone {
-                            let ratio = (mouse_x - (rect.right() - safe_zone)) / safe_zone;
+                        } else if mouse_x > r.right() - safe_zone {
+                            let ratio = (mouse_x - (r.right() - safe_zone)) / safe_zone;
                             *pan_velocity.borrow_mut() = 10.0 * ratio.min(1.0);
                         } else {
                             *pan_velocity.borrow_mut() = 0.0;
@@ -852,9 +886,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             let handle_width = handle_rect.width();
 
                             let vp_width = v.client_width() as f64;
-                            let vp_scroll_width = v.scroll_width() as f64;
+                            let vp_scroll_width = width_px_val;
                             viewport_width.set(vp_width);
-                            scroll_width.set(vp_scroll_width);
 
                             let track_scrollable_width = track_width - handle_width;
                             let viewport_scrollable_width = (vp_scroll_width - vp_width).max(0.0);
@@ -1085,7 +1118,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 on_zoom_out={zoom_out}
                 scroll_left={*scroll_left}
                 viewport_width={*viewport_width}
-                total_width={if *scroll_width > 0.0 { *scroll_width } else { width_px.as_f64() }}
+                total_width={width_px.as_f64()}
                 on_scrollbar_mousedown={on_scrollbar_mousedown}
             />
             <div class="timeline-body">

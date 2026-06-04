@@ -66,7 +66,7 @@ impl AppState {
         let last_lyric_ms = self.document.as_ref()
             .and_then(|doc| doc.last_entry_time_ms())
             .unwrap_or(TimeMs(0));
-        TimeMs(self.duration_ms.as_u32().max(last_lyric_ms.as_u32()) + 10000)
+        TimeMs(self.duration_ms.as_u32().max(last_lyric_ms.as_u32()) + 15000)
     }
 
     pub fn update_document(&mut self, source: String) {
@@ -161,7 +161,7 @@ impl Reducible for AppState {
                 }
             }
             AppAction::SetZoom(zoom) => {
-                new_state.zoom_level = zoom.clamp(0.1, 10.0);
+                new_state.zoom_level = zoom.clamp(0.001, 10.0);
             }
             AppAction::SaveHistory(source) => {
                 new_state.history.truncate(new_state.history_index + 1);
@@ -309,14 +309,14 @@ mod tests {
     #[test]
     fn test_duration_clamping() {
         let state = mock_state();
-        // Default duration is 0, so max_timeline_duration is 10000ms (overscroll)
+        // Default duration is 0, so max_timeline_duration is 15000ms (overscroll)
         
-        let seek_far = state.clone().reduce(AppAction::Seek(TimeMs(20000)));
-        assert_eq!(seek_far.current_time_ms, TimeMs(10000));
+        let seek_far = state.clone().reduce(AppAction::Seek(TimeMs(25000)));
+        assert_eq!(seek_far.current_time_ms, TimeMs(15000));
         
         let set_dur = state.clone().reduce(AppAction::SetDuration(TimeMs(5000)));
-        // max_timeline_duration becomes 15000ms
-        let seek_edge = set_dur.reduce(AppAction::Seek(TimeMs(15000)));
-        assert_eq!(seek_edge.current_time_ms, TimeMs(15000));
+        // max_timeline_duration becomes 20000ms
+        let seek_edge = set_dur.reduce(AppAction::Seek(TimeMs(20000)));
+        assert_eq!(seek_edge.current_time_ms, TimeMs(20000));
     }
 }
