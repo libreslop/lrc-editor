@@ -1,5 +1,4 @@
 pub mod app;
-pub mod audio;
 pub mod components;
 pub mod editor;
 pub mod actions;

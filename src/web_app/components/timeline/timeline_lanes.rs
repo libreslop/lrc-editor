@@ -2,6 +2,8 @@ use yew::prelude::*;
 use crate::domain::{Pixels, TimeMs};
 use crate::web_app::actions::{AppState};
 use super::{WaveformCanvas, LyricChunk, DragTarget};
+use super::waveform_canvas::WaveformSummary;
+use std::rc::Rc;
 
 #[derive(Properties, PartialEq)]
 pub struct TimelineLanesProps {
@@ -10,6 +12,9 @@ pub struct TimelineLanesProps {
     pub canvas_ref: NodeRef,
     pub playhead_ref: NodeRef,
     pub audio_url: Option<String>,
+    pub waveform_summary: Option<Rc<WaveformSummary>>,
+    pub scroll_left: f64,
+    pub viewport_width: f64,
     pub duration_ms: TimeMs,
     pub width_px: Pixels,
     pub audio_width_px: Pixels,
@@ -45,8 +50,10 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                 <div class="track-lane audio-lane">
                     <WaveformCanvas 
                         canvas_ref={props.canvas_ref.clone()} 
-                        audio_url={props.audio_url.clone()} 
+                        summary={props.waveform_summary.clone()} 
                         width={props.audio_width_px} 
+                        scroll_left={props.scroll_left}
+                        viewport_width={props.viewport_width}
                     />
                     if props.audio_url.is_none() {
                         <div class="import-audio-button" onclick={props.on_import_audio.clone()}>

@@ -207,3 +207,51 @@ impl Reducible for AppState {
         Rc::new(new_state)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mock_state() -> Rc<AppState> {
+        Rc::new(AppState {
+            source_text: String::new(),
+            document: None,
+            selection: SelectionState::default(),
+            parse_error: None,
+            current_time_ms: TimeMs(0),
+            duration_ms: TimeMs(0),
+            playing: false,
+            last_seek_request: None,
+            history: vec![String::new()],
+            history_index: 0,
+            zoom_level: 1.0,
+        })
+    }
+
+    #[test]
+    fn test_reduce_update_source() {
+        let state = mock_state();
+        let new_state = state.reduce(AppAction::UpdateSource("[00:01.00]Test".to_string()));
+        assert_eq!(new_state.source_text, "[00:01.00]Test");
+        assert!(new_state.document.is_some());
+        assert!(new_state.parse_error.is_none());
+    }
+
+    #[test]
+    fn test_reduce_seek() {
+        let state = mock_state();
+        let new_state = state.reduce(AppAction::Seek(TimeMs(1000)));
+        assert_eq!(new_state.current_time_ms, TimeMs(1000));
+        assert_eq!(new_state.last_seek_request, Some(TimeMs(1000)));
+    }
+
+    #[test]
+    fn test_reduce_zoom() {
+        let state = mock_state();
+        let new_state = state.clone().reduce(AppAction::SetZoom(2.0));
+        assert_eq!(new_state.zoom_level, 2.0);
+        
+        let clamped = state.reduce(AppAction::SetZoom(100.0));
+        assert_eq!(clamped.zoom_level, 10.0);
+    }
+}

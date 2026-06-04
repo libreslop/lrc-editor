@@ -1,28 +1,48 @@
 use yew::prelude::*;
-use web_sys::{HtmlCanvasElement, AudioContext, Request, RequestInit, RequestMode, Response};
-use wasm_bindgen_futures::{spawn_local, JsFuture};
+use web_sys::{HtmlCanvasElement};
 use wasm_bindgen::JsCast;
-use crate::domain::Pixels;
+use crate::domain::{Pixels};
+use std::rc::Rc;
+
+#[derive(Clone, PartialEq)]
+pub struct WaveformSummary {
+    pub bins: Vec<(f32, f32)>, // (min, max)
+    pub samples_per_bin: usize,
+    pub sample_rate: f32,
+}
 
 #[derive(Properties, PartialEq)]
 pub struct WaveformCanvasProps {
     pub canvas_ref: NodeRef,
-    pub audio_url: Option<String>,
+    pub summary: Option<Rc<WaveformSummary>>,
     pub width: Pixels,
+    pub scroll_left: f64,
+    pub viewport_width: f64,
 }
 
 #[function_component(WaveformCanvas)]
 pub fn waveform_canvas(props: &WaveformCanvasProps) -> Html {
     let canvas_ref = props.canvas_ref.clone();
-    let url = props.audio_url.clone();
+    let summary = props.summary.clone();
     let width = props.width;
+    let scroll_left = props.scroll_left;
+    let viewport_width = props.viewport_width;
 
-    use_effect_with((url.clone(), width), move |(url, width)| {
-        if let Some(u) = url {
+    use_effect_with((summary, width, scroll_left, viewport_width), move |(summary, width, scroll_left, viewport_width)| {
+        if let Some(s) = summary {
             if let Some(canvas) = canvas_ref.cast::<HtmlCanvasElement>() {
-                canvas.set_width(width.as_f64() as u32);
-                canvas.set_height(canvas.client_height() as u32);
-                draw_waveform(canvas, u.clone());
+                // Ensure canvas internal resolution matches display size
+                let display_width = width.as_f64();
+                let display_height = canvas.client_height() as f64;
+                
+                if canvas.width() as f64 != display_width {
+                    canvas.set_width(display_width as u32);
+                }
+                if canvas.height() as f64 != display_height {
+                    canvas.set_height(display_height as u32);
+                }
+
+                draw_waveform_tiled(&canvas, s, *scroll_left, *viewport_width);
             }
         }
         || ()
@@ -33,52 +53,57 @@ pub fn waveform_canvas(props: &WaveformCanvasProps) -> Html {
     }
 }
 
-fn draw_waveform(canvas: HtmlCanvasElement, url: String) {
-    spawn_local(async move {
-        let opts = RequestInit::new();
-        opts.set_method("GET");
-        opts.set_mode(RequestMode::Cors);
-        let request = Request::new_with_str_and_init(&url, &opts).unwrap();
-        let window = web_sys::window().unwrap();
+fn draw_waveform_tiled(canvas: &HtmlCanvasElement, summary: &WaveformSummary, scroll_left: f64, viewport_width: f64) {
+    let ctx = canvas
+        .get_context("2d")
+        .unwrap()
+        .unwrap()
+        .dyn_into::<web_sys::CanvasRenderingContext2d>()
+        .unwrap();
         
-        let resp_value = JsFuture::from(window.fetch_with_request(&request)).await.unwrap();
-        let resp: Response = resp_value.dyn_into().unwrap();
-        let array_buffer = JsFuture::from(resp.array_buffer().unwrap()).await.unwrap();
+    let full_width = canvas.width() as f64;
+    let height = canvas.height() as f64;
+    let amp = height / 2.0;
+
+    // Calculate visible range with 50% overscroll buffer
+    let buffer = viewport_width * 0.5;
+    let start_x = (scroll_left - buffer).max(0.0);
+    let end_x = (scroll_left + viewport_width + buffer).min(full_width);
+
+    // Strictly no caching: clear the entire giant canvas
+    // (In a future update, we should switch to a viewport-sized canvas)
+    ctx.clear_rect(0.0, 0.0, full_width, height);
+    
+    ctx.set_fill_style_str("#1fb7b0"); // --teal
+
+    let total_bins = summary.bins.len() as f64;
+    let bins_per_pixel = total_bins / full_width;
+
+    for x in (start_x as usize)..(end_x as usize) {
+        let bin_idx_start = (x as f64 * bins_per_pixel) as usize;
+        let bin_idx_end = ((x + 1) as f64 * bins_per_pixel) as usize;
         
-        let audio_ctx = AudioContext::new().unwrap();
-        let audio_buffer_promise = audio_ctx.decode_audio_data(&array_buffer.into()).unwrap();
-        let audio_buffer_value = JsFuture::from(audio_buffer_promise).await.unwrap();
-        let audio_buffer: web_sys::AudioBuffer = audio_buffer_value.dyn_into().unwrap();
+        let mut min = 1.0f32;
+        let mut max = -1.0f32;
         
-        let ctx = canvas
-            .get_context("2d")
-            .unwrap()
-            .unwrap()
-            .dyn_into::<web_sys::CanvasRenderingContext2d>()
-            .unwrap();
-            
-        let width = canvas.width() as f64;
-        let height = canvas.height() as f64;
-        ctx.clear_rect(0.0, 0.0, width, height);
-        ctx.set_fill_style_str("#1fb7b0"); // --teal
-        
-        if let Ok(data) = audio_buffer.get_channel_data(0) {
-            let step = (data.len() as f64 / width).ceil() as usize;
-            let amp = height / 2.0;
-            
-            for i in 0..(width as usize) {
-                let mut min = 1.0f32;
-                let mut max = -1.0f32;
-                for j in 0..step {
-                    let idx = i * step + j;
-                    if idx < data.len() {
-                        let val = data[idx];
-                        if val < min { min = val; }
-                        if val > max { max = val; }
-                    }
+        if bin_idx_start < summary.bins.len() {
+            let actual_end = bin_idx_end.min(summary.bins.len());
+            if bin_idx_start == actual_end {
+                // At least one bin
+                let (b_min, b_max) = summary.bins[bin_idx_start];
+                min = b_min;
+                max = b_max;
+            } else {
+                for i in bin_idx_start..actual_end {
+                    let (b_min, b_max) = summary.bins[i];
+                    if b_min < min { min = b_min; }
+                    if b_max > max { max = b_max; }
                 }
-                ctx.fill_rect(i as f64, amp as f64 + (min as f64 * amp), 1.0, (max - min) as f64 * amp);
             }
+            
+            let y = amp + (min as f64 * amp);
+            let h = (max - min) as f64 * amp;
+            ctx.fill_rect(x as f64, y, 1.0, h.max(1.0));
         }
-    });
+    }
 }

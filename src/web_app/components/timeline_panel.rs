@@ -1,9 +1,12 @@
 use yew::prelude::*;
-use web_sys::{HtmlAudioElement, HtmlInputElement, Url};
+use web_sys::{HtmlAudioElement, HtmlInputElement, Url, AudioContext, Request, RequestInit, RequestMode, Response};
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::{spawn_local, JsFuture};
+use std::rc::Rc;
 use crate::web_app::actions::{AppState, AppAction};
 use crate::domain::{TimeMs, Pixels};
 use super::timeline::{PlaybackControls, TrackPads, TimelineLanes, DragTarget};
+use super::timeline::waveform_canvas::WaveformSummary;
 
 #[derive(Properties, PartialEq)]
 pub struct TimelinePanelProps {
@@ -23,6 +26,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let timecode_ref = use_node_ref();
     
     let audio_url = use_state(|| None::<String>);
+    let waveform_summary = use_state(|| None::<Rc<WaveformSummary>>);
+    let scroll_left = use_state(|| 0.0);
+    let viewport_width = use_state(|| 0.0);
 
     let drag_mode = use_state(|| None::<DragTarget>);
     let drag_start_x = use_state(|| Pixels(0.0));
@@ -33,12 +39,34 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     let on_file_change = {
         let audio_url = audio_url.clone();
+        let waveform_summary = waveform_summary.clone();
         Callback::from(move |e: Event| {
             let input = e.target_unchecked_into::<HtmlInputElement>();
             if let Some(files) = input.files() {
                 if let Some(file) = files.get(0) {
                     if let Ok(url) = Url::create_object_url_with_blob(&file) {
-                        audio_url.set(Some(url));
+                        audio_url.set(Some(url.clone()));
+                        
+                        let waveform_summary = waveform_summary.clone();
+                        spawn_local(async move {
+                            let opts = RequestInit::new();
+                            opts.set_method("GET");
+                            opts.set_mode(RequestMode::Cors);
+                            let request = Request::new_with_str_and_init(&url, &opts).unwrap();
+                            let window = web_sys::window().unwrap();
+                            
+                            if let Ok(resp_value) = JsFuture::from(window.fetch_with_request(&request)).await {
+                                let resp: Response = resp_value.dyn_into().unwrap();
+                                let array_buffer = JsFuture::from(resp.array_buffer().unwrap()).await.unwrap();
+                                
+                                let audio_ctx = AudioContext::new().unwrap();
+                                let audio_buffer_promise = audio_ctx.decode_audio_data(&array_buffer.into()).unwrap();
+                                if let Ok(audio_buffer_value) = JsFuture::from(audio_buffer_promise).await {
+                                    let audio_buffer: web_sys::AudioBuffer = audio_buffer_value.dyn_into().unwrap();
+                                    waveform_summary.set(Some(Rc::new(downsample_audio(audio_buffer))));
+                                }
+                            }
+                        });
                     }
                 }
             }
@@ -289,8 +317,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     let on_viewport_scroll = {
         let scrollbar_ref = scrollbar_ref.clone();
+        let scroll_left = scroll_left.clone();
         Callback::from(move |e: Event| {
             if let Some(viewport) = e.target_dyn_into::<web_sys::HtmlElement>() {
+                scroll_left.set(viewport.scroll_left() as f64);
                 if let Some(scrollbar) = scrollbar_ref.cast::<web_sys::HtmlElement>() {
                     if (scrollbar.scroll_left() - viewport.scroll_left()).abs() > 1 {
                         scrollbar.set_scroll_left(viewport.scroll_left());
@@ -302,16 +332,43 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     let on_scrollbar_scroll = {
         let viewport_ref = viewport_ref.clone();
+        let scroll_left = scroll_left.clone();
         Callback::from(move |e: Event| {
             if let Some(scrollbar) = e.target_dyn_into::<web_sys::HtmlElement>() {
                 if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
                     if (viewport.scroll_left() - scrollbar.scroll_left()).abs() > 1 {
                         viewport.set_scroll_left(scrollbar.scroll_left());
+                        scroll_left.set(scrollbar.scroll_left() as f64);
                     }
                 }
             }
         })
     };
+
+    {
+        let viewport_ref = viewport_ref.clone();
+        let viewport_width = viewport_width.clone();
+        use_effect_with((), move |_| {
+            let vw_clone = viewport_width.clone();
+            let vr_clone = viewport_ref.clone();
+            let listener = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+                if let Some(v) = vr_clone.cast::<web_sys::HtmlElement>() {
+                    vw_clone.set(v.client_width() as f64);
+                }
+            }) as Box<dyn FnMut()>);
+            
+            let window = web_sys::window().unwrap();
+            window.add_event_listener_with_callback("resize", listener.as_ref().unchecked_ref()).unwrap();
+            
+            if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                viewport_width.set(v.client_width() as f64);
+            }
+            
+            move || {
+                window.remove_event_listener_with_callback("resize", listener.as_ref().unchecked_ref()).unwrap();
+            }
+        });
+    }
 
     let toggle_play = {
         let state = props.state.clone();
@@ -677,6 +734,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     canvas_ref={canvas_ref}
                     playhead_ref={playhead_ref.clone()}
                     audio_url={(*audio_url).clone()}
+                    waveform_summary={(*waveform_summary).clone()}
+                    scroll_left={*scroll_left}
+                    viewport_width={*viewport_width}
                     duration_ms={duration_ms}
                     width_px={width_px}
                     audio_width_px={audio_width_px}
@@ -699,5 +759,34 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 </div>
             </div>
         </div>
+    }
+}
+
+fn downsample_audio(audio_buffer: web_sys::AudioBuffer) -> WaveformSummary {
+    let sample_rate = audio_buffer.sample_rate();
+    let data = audio_buffer.get_channel_data(0).unwrap_or_else(|_| vec![0.0]);
+    
+    // Target resolution: 200 bins per second
+    let bins_per_second = 200;
+    let samples_per_bin = (sample_rate as f64 / bins_per_second as f64).max(1.0) as usize;
+    
+    let mut bins = Vec::with_capacity(data.len() / samples_per_bin);
+    
+    for i in (0..data.len()).step_by(samples_per_bin) {
+        let mut min = 1.0f32;
+        let mut max = -1.0f32;
+        let end = (i + samples_per_bin).min(data.len());
+        for j in i..end {
+            let val = data[j];
+            if val < min { min = val; }
+            if val > max { max = val; }
+        }
+        bins.push((min, max));
+    }
+    
+    WaveformSummary {
+        bins,
+        samples_per_bin,
+        sample_rate,
     }
 }

@@ -113,6 +113,27 @@ impl TimeMs {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_time_ms_as_timestamp() {
+        assert_eq!(TimeMs(0).as_timestamp(), "00:00.00");
+        assert_eq!(TimeMs(61050).as_timestamp(), "01:01.05");
+        assert_eq!(TimeMs(3599990).as_timestamp(), "59:59.99");
+    }
+
+    #[test]
+    fn test_time_ms_parse() {
+        let line = SourceLine(0);
+        assert_eq!(TimeMs::parse("01:02.03", line).unwrap(), Some(TimeMs(62030)));
+        assert_eq!(TimeMs::parse("00:00.000", line).unwrap(), Some(TimeMs(0)));
+        assert_eq!(TimeMs::parse("10:00.5", line).unwrap(), Some(TimeMs(600500)));
+        assert_eq!(TimeMs::parse("not a time", line).unwrap(), None);
+    }
+}
+
 /// A physical pixel distance or coordinate on the screen.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
 pub struct Pixels(pub f64);

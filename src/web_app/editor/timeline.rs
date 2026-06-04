@@ -4,9 +4,7 @@ use crate::domain::{LrcDocument, TimeMs};
 pub struct Interval {
     pub start: TimeMs,
     pub end: TimeMs,
-    pub text: String,
     pub raw_text: String,
-    pub id: usize,
     pub is_empty: bool,
 }
 
@@ -20,9 +18,7 @@ pub fn shift_selected(doc: &LrcDocument, selected_ids: &[usize], delta_ms: i32, 
         let mut i = Interval {
             start: c.start_ms(),
             end: c.end_ms(),
-            text: c.text().to_string(),
             raw_text: c.raw_text().to_string(),
-            id: c.entry_id(),
             is_empty: c.is_empty(),
         };
         
@@ -90,9 +86,7 @@ pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, delta
         intervals.push(Interval {
             start: c.start_ms(),
             end: c.end_ms(),
-            text: c.text().to_string(),
             raw_text: c.raw_text().to_string(),
-            id: c.entry_id(),
             is_empty: c.is_empty(),
         });
     }
@@ -126,9 +120,7 @@ fn build_lrc(doc: &LrcDocument, final_intervals: Vec<Interval>) -> String {
             resolved.push(Interval {
                 start: current_time,
                 end: i.start,
-                text: String::new(),
                 raw_text: String::new(),
-                id: usize::MAX,
                 is_empty: true,
             });
         }
