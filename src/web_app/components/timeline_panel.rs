@@ -19,6 +19,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     
     let audio_ref = use_node_ref();
     let file_input_ref = use_node_ref();
+    let lrc_input_ref = use_node_ref();
     let canvas_ref = use_node_ref();
     let viewport_ref = use_node_ref();
     let scrollbar_ref = use_node_ref();
@@ -82,6 +83,53 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             if let Some(input) = file_input_ref.cast::<HtmlInputElement>() {
                 input.click();
             }
+        })
+    };
+
+    let import_lrc_click = {
+        let lrc_input_ref = lrc_input_ref.clone();
+        Callback::from(move |_| {
+            if let Some(input) = lrc_input_ref.cast::<HtmlInputElement>() {
+                input.click();
+            }
+        })
+    };
+
+    let on_lrc_change = {
+        let state = props.state.clone();
+        Callback::from(move |e: Event| {
+            let input = e.target_unchecked_into::<HtmlInputElement>();
+            if let Some(files) = input.files() {
+                if let Some(file) = files.get(0) {
+                    let state = state.clone();
+                    spawn_local(async move {
+                        let text_promise = file.text();
+                        if let Ok(text_value) = JsFuture::from(text_promise).await {
+                            if let Some(text) = text_value.as_string() {
+                                state.dispatch(AppAction::UpdateSource(text.clone()));
+                                state.dispatch(AppAction::SaveHistory(text));
+                            }
+                        }
+                    });
+                }
+            }
+        })
+    };
+
+    let export_lrc = {
+        let state = props.state.clone();
+        Callback::from(move |_| {
+            let text = state.source_text.clone();
+            let window = web_sys::window().unwrap();
+            let document = window.document().unwrap();
+            let blob = web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&text.into())).unwrap();
+            let url = web_sys::Url::create_object_url_with_blob(&blob).unwrap();
+            
+            let a = document.create_element("a").unwrap().dyn_into::<web_sys::HtmlAnchorElement>().unwrap();
+            a.set_href(&url);
+            a.set_download("lyrics.lrc");
+            a.click();
+            let _ = web_sys::Url::revoke_object_url(&url);
         })
     };
 
@@ -385,13 +433,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         })
     };
 
-    let select_all = {
-        let state = props.state.clone();
-        Callback::from(move |_| {
-            state.dispatch(AppAction::SelectAll);
-        })
-    };
-
     let zoom_in = {
         let state = props.state.clone();
         let viewport_ref = viewport_ref.clone();
@@ -571,7 +612,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let _ = viewport.focus();
                 
-                state.dispatch(AppAction::ClearSelection);
+                if !e.ctrl_key() && !e.meta_key() && !e.shift_key() {
+                    state.dispatch(AppAction::ClearSelection);
+                }
                 
                 let rect = viewport.get_bounding_client_rect();
                 let x = e.client_x() as f64 - rect.left() + viewport.scroll_left() as f64;
@@ -805,6 +848,13 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 style="display: none;" 
                 onchange={on_file_change} 
             />
+            <input 
+                type="file" 
+                accept=".lrc,.txt" 
+                ref={lrc_input_ref} 
+                style="display: none;" 
+                onchange={on_lrc_change} 
+            />
             {
                 if let Some(url) = &*audio_url {
                     html! {
@@ -828,7 +878,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             <div class="timeline-body">
                 <TrackPads 
                     on_import_audio={import_click.clone()}
-                    on_select_all={select_all}
+                    on_import_lrc={import_lrc_click}
+                    on_export_lrc={export_lrc}
                 />
                 <TimelineLanes 
                     state={props.state.clone()}

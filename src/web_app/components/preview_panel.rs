@@ -9,26 +9,42 @@ pub struct PreviewPanelProps {
 
 #[function_component(PreviewPanel)]
 pub fn preview_panel(props: &PreviewPanelProps) -> Html {
+    let preview_ref = use_node_ref();
     
     // We will need a way to detect scroll and detach autoscroll, but for now let's just render the lyrics.
     let is_autoscroll_active = use_state(|| true);
 
     let disable_autoscroll_wheel = {
         let is_autoscroll_active = is_autoscroll_active.clone();
+        let preview_ref = preview_ref.clone();
         Callback::from(move |_: WheelEvent| {
-            is_autoscroll_active.set(false);
+            if let Some(preview) = preview_ref.cast::<web_sys::HtmlElement>() {
+                if preview.scroll_height() > preview.client_height() {
+                    is_autoscroll_active.set(false);
+                }
+            }
         })
     };
     let disable_autoscroll_mouse = {
         let is_autoscroll_active = is_autoscroll_active.clone();
+        let preview_ref = preview_ref.clone();
         Callback::from(move |_: MouseEvent| {
-            is_autoscroll_active.set(false);
+            if let Some(preview) = preview_ref.cast::<web_sys::HtmlElement>() {
+                if preview.scroll_height() > preview.client_height() {
+                    is_autoscroll_active.set(false);
+                }
+            }
         })
     };
     let disable_autoscroll_touch = {
         let is_autoscroll_active = is_autoscroll_active.clone();
+        let preview_ref = preview_ref.clone();
         Callback::from(move |_: TouchEvent| {
-            is_autoscroll_active.set(false);
+            if let Some(preview) = preview_ref.cast::<web_sys::HtmlElement>() {
+                if preview.scroll_height() > preview.client_height() {
+                    is_autoscroll_active.set(false);
+                }
+            }
         })
     };
     let resume_autoscroll = {
@@ -38,7 +54,6 @@ pub fn preview_panel(props: &PreviewPanelProps) -> Html {
         })
     };
     
-    let preview_ref = use_node_ref();
     {
         let current_time_ms = props.state.current_time_ms;
         let preview_ref = preview_ref.clone();
