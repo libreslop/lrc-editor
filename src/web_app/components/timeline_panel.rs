@@ -169,10 +169,12 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let last_seek_ref = yew::use_mut_ref(|| props.state.last_seek_request);
         *last_seek_ref.borrow_mut() = props.state.last_seek_request;
 
-        use_effect_with(playing, move |playing| {
+        let dragging_playhead = *drag_mode == Some(DragTarget::Playhead);
+
+        use_effect_with((playing, dragging_playhead), move |(playing, dragging_playhead)| {
             let mut interval_opt = None;
             
-            if *playing {
+            if *playing && !*dragging_playhead {
                 let start_time = *current_time_ref.borrow();
                 
                 if let Some(audio) = audio_ref.cast::<web_sys::HtmlAudioElement>() {
@@ -180,7 +182,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     if start_time.as_u32() < audio_dur_ms {
                         let _ = audio.play();
                     } else {
-                        // Ensure audio is paused if we are past duration
                         let _ = audio.pause();
                     }
                 }
@@ -211,9 +212,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             local_current = TimeMs((audio.current_time() * 1000.0) as u32);
                             synced = true;
                         } else if local_current.as_u32() < audio_dur_ms && audio.paused() {
-                            // If we are before audio end but it's paused (e.g. buffering or just started)
-                            // We should probably wait for it or just drift. 
-                            // For now, let's just drift to keep it simple, but try to play if possible.
                             let _ = audio.play();
                         }
                     }
