@@ -95,9 +95,19 @@ pub fn app() -> Html {
 
     {
         let state = state.clone();
-        use_effect_with((), move |_| {
+        let show_help = show_help.clone();
+        use_effect_with(show_help.clone(), move |show_help_val| {
+            let is_help_open = **show_help_val;
             let window = web_sys::window().unwrap();
+            let state = state.clone();
+            let show_help = show_help.clone();
+            
             let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
+                if is_help_open && e.key() == "Escape" {
+                    show_help.set(false);
+                    return;
+                }
+
                 if let Some(target) = e.target() {
                     if let Ok(el) = target.dyn_into::<web_sys::HtmlElement>() {
                         let tag = el.tag_name();
@@ -106,16 +116,40 @@ pub fn app() -> Html {
                         }
                     }
                 }
-                if e.key() == " " {
-                    e.prevent_default();
-                    state.dispatch(AppAction::TogglePlay);
+
+                let ctrl = e.ctrl_key() || e.meta_key();
+                let shift = e.shift_key();
+
+                match e.key().as_str() {
+                    " " => {
+                        e.prevent_default();
+                        state.dispatch(AppAction::TogglePlay);
+                    }
+                    "z" | "Z" if ctrl && !shift => {
+                        e.prevent_default();
+                        state.dispatch(AppAction::Undo);
+                    }
+                    "y" | "Y" if ctrl => {
+                        e.prevent_default();
+                        state.dispatch(AppAction::Redo);
+                    }
+                    "z" | "Z" if ctrl && shift => {
+                        e.prevent_default();
+                        state.dispatch(AppAction::Redo);
+                    }
+                    "a" | "A" if ctrl => {
+                        e.prevent_default();
+                        state.dispatch(AppAction::SelectAll);
+                    }
+                    _ => {}
                 }
             }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
             
             let _ = window.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
             
+            let window_inner = window.clone();
             move || {
-                let _ = window.remove_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
+                let _ = window_inner.remove_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
             }
         });
     }
@@ -157,7 +191,12 @@ pub fn app() -> Html {
             if *show_help {
                 <div class="help-overlay" onclick={toggle_help.clone()}>
                     <div class="help-popup" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                        <h2>{"Keyboard Shortcuts"}</h2>
+                        <div class="help-header">
+                            <h2>{"Keyboard Shortcuts"}</h2>
+                            <button class="icon-button close-button" onclick={toggle_help.clone()}>
+                                <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                        </div>
                         <div class="keybind-list">
                             <div class="keybind-item">
                                 <span class="keybind-desc">{"Play / Pause"}</span>
@@ -169,7 +208,7 @@ pub fn app() -> Html {
                             </div>
                             <div class="keybind-item">
                                 <span class="keybind-desc">{"Redo"}</span>
-                                <span class="keybind-key">{"Ctrl + Y"}</span>
+                                <span class="keybind-key">{"Ctrl + Y / Ctrl + Shift + Z"}</span>
                             </div>
                             <div class="keybind-item">
                                 <span class="keybind-desc">{"Delete Selected"}</span>
@@ -186,10 +225,6 @@ pub fn app() -> Html {
                             <div class="keybind-item">
                                 <span class="keybind-desc">{"Zoom In / Out"}</span>
                                 <span class="keybind-key">{"Ctrl + Wheel"}</span>
-                            </div>
-                            <div class="keybind-item">
-                                <span class="keybind-desc">{"Snap to Grid (Hold)"}</span>
-                                <span class="keybind-key">{"Alt"}</span>
                             </div>
                         </div>
                     </div>
