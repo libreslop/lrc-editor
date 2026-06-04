@@ -553,7 +553,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         let rect = v.get_bounding_client_rect();
                         let mouse_x = e.client_x() as f64;
                         
-                        let safe_zone = 60.0;
+                        let safe_zone = 90.0;
                         if mouse_x < rect.left() + safe_zone {
                             let ratio = (rect.left() + safe_zone - mouse_x) / safe_zone;
                             *pan_velocity.borrow_mut() = -10.0 * ratio.min(1.0);
