@@ -45,6 +45,40 @@ impl<'a> TimelineEditor<'a> {
         self.build_lrc(intervals)
     }
 
+    /// Adds a new chunk to the timeline track.
+    pub fn add_chunk(&self, start: TimeMs, end: TimeMs, duration_ms: TimeMs) -> String {
+        let chunks = self.doc.timeline_chunks(duration_ms);
+        let mut statics = Vec::new();
+        
+        for c in chunks {
+            if !c.is_empty() {
+                statics.push(Interval {
+                    entry_id: c.entry_id(),
+                    uid: c.uid(),
+                    color_index: c.color_index(),
+                    start: c.start_ms(),
+                    end: c.end_ms(),
+                    raw_text: c.raw_text().to_string(),
+                    is_empty: c.is_empty(),
+                });
+            }
+        }
+        
+        let new_chunk = Interval {
+            entry_id: 0,
+            uid: 0,
+            color_index: 0,
+            start,
+            end,
+            raw_text: "Change me".to_string(),
+            is_empty: false,
+        };
+        
+        let resolved = Self::resolve_overlaps(statics, vec![new_chunk]);
+        self.build_lrc(resolved)
+    }
+
+
     pub fn preview_intervals(
         &self,
         duration_ms: TimeMs,
@@ -375,3 +409,93 @@ impl TimelineSnapper {
         raw_offset_ms
     }
 }
+
+/// Helper function to find the gap containing the given time.
+pub fn find_gap(doc: Option<&LrcDocument>, t: TimeMs, duration_ms: TimeMs) -> Option<(TimeMs, TimeMs)> {
+    if let Some(doc) = doc {
+        let entries = doc.entries();
+        if entries.is_empty() {
+            return Some((TimeMs(0), duration_ms));
+        }
+        
+        let first_start = entries[0].time_ms();
+        if t < first_start {
+            return Some((TimeMs(0), first_start));
+        }
+        
+        let chunks = doc.timeline_chunks(duration_ms);
+        for chunk in chunks {
+            if t >= chunk.start_ms() && t < chunk.end_ms() {
+                if chunk.is_empty() {
+                    return Some((chunk.start_ms(), chunk.end_ms()));
+                } else {
+                    return None;
+                }
+            }
+        }
+        
+        let last_end = entries.last().unwrap().time_ms();
+        if t >= last_end && t < duration_ms {
+            return Some((last_end, duration_ms));
+        }
+    } else {
+        return Some((TimeMs(0), duration_ms));
+    }
+    None
+}
+
+/// Helper function to calculate the ghost chunk boundaries.
+pub fn calculate_ghost_chunk(
+    state: &AppState,
+    t: TimeMs,
+    gap_start: TimeMs,
+    gap_end: TimeMs,
+    duration_ms: TimeMs,
+    px_per_second: Pixels,
+) -> (TimeMs, TimeMs) {
+    let gap_len = gap_end.as_u32() as i32 - gap_start.as_u32() as i32;
+    if gap_len <= 5000 {
+        return (gap_start, gap_end);
+    }
+    
+    let t_val = t.as_u32() as i32;
+    let mut ghost_start = t_val - 2500;
+    let mut ghost_end = t_val + 2500;
+    
+    let gap_start_val = gap_start.as_u32() as i32;
+    let gap_end_val = gap_end.as_u32() as i32;
+    
+    if ghost_start < gap_start_val {
+        ghost_start = gap_start_val;
+        ghost_end = gap_start_val + 5000;
+    } else if ghost_end > gap_end_val {
+        ghost_end = gap_end_val;
+        ghost_start = gap_end_val - 5000;
+    }
+    
+    let start_time = TimeMs(ghost_start.max(0) as u32);
+    let end_time = TimeMs(ghost_end.max(0) as u32);
+    
+    let snapped_start = TimelineSnapper::snap_playhead(
+        state,
+        start_time,
+        duration_ms,
+        px_per_second,
+    );
+    let snapped_end = TimelineSnapper::snap_playhead(
+        state,
+        end_time,
+        duration_ms,
+        px_per_second,
+    );
+    
+    let final_start = snapped_start.max(gap_start).min(gap_end);
+    let final_end = snapped_end.max(gap_start).min(gap_end);
+    
+    if final_start < final_end {
+        (final_start, final_end)
+    } else {
+        (start_time, end_time)
+    }
+}
+

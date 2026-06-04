@@ -3,6 +3,7 @@ use crate::domain::{Pixels, TimeMs};
 use crate::web_app::actions::{AppState};
 use super::{WaveformCanvas, LyricChunk, DragTarget};
 use super::waveform_canvas::WaveformSummary;
+use crate::web_app::editor::timeline::{find_gap, calculate_ghost_chunk};
 use std::rc::Rc;
 
 #[derive(Properties, PartialEq)]
@@ -31,6 +32,12 @@ pub struct TimelineLanesProps {
     pub on_chunk_drag_start: Callback<(usize, MouseEvent, DragTarget)>,
     pub on_wheel: Callback<WheelEvent>,
     pub selection_rect: Option<crate::domain::Rect>,
+    pub hover_lyrics_time: Option<TimeMs>,
+    pub drag_create_start: Option<TimeMs>,
+    pub drag_create_current: Option<TimeMs>,
+    pub on_mousedown_lyrics: Callback<MouseEvent>,
+    pub on_mousemove_lyrics: Callback<MouseEvent>,
+    pub on_mouseleave_lyrics: Callback<MouseEvent>,
 }
 
 #[function_component(TimelineLanes)]
@@ -74,7 +81,12 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                         }
                     }
                 </div>
-                <div class="track-lane lyrics-lane">
+                <div 
+                    class="track-lane lyrics-lane"
+                    onmousedown={props.on_mousedown_lyrics.clone()}
+                    onmousemove={props.on_mousemove_lyrics.clone()}
+                    onmouseleave={props.on_mouseleave_lyrics.clone()}
+                >
                     {
                         if let Some(doc) = doc {
                             let chunks: Vec<crate::web_app::editor::timeline::Interval> = if let Some(mode) = props.drag_mode {
@@ -165,6 +177,55 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                                 }
                             }
                             chunk_html.into_iter().collect::<Html>()
+                        } else {
+                            html! {}
+                        }
+                    }
+                    {
+                        if props.drag_create_start.is_some() && props.drag_create_current.is_some() {
+                            let start = props.drag_create_start.unwrap();
+                            let current = props.drag_create_current.unwrap();
+                            let min_t = start.min(current);
+                            let max_t = start.max(current);
+                            let start_px = min_t.to_secs() * props.px_per_second.as_f64();
+                            let end_px = max_t.to_secs() * props.px_per_second.as_f64();
+                            let width_px = (end_px - start_px).max(1.0);
+                            
+                            html! {
+                                <div 
+                                    class="lyric-chunk drag-create-chunk"
+                                    style={format!("left: {}px; width: {}px;", start_px, width_px)}
+                                >
+                                    { "Change me" }
+                                </div>
+                            }
+                        } else if props.drag_create_start.is_none() && props.hover_lyrics_time.is_some() {
+                            let hover_t = props.hover_lyrics_time.unwrap();
+                            let gap = find_gap(doc, hover_t, props.duration_ms);
+                            if let Some((gap_start, gap_end)) = gap {
+                                let (g_start, g_end) = calculate_ghost_chunk(
+                                    &props.state,
+                                    hover_t,
+                                    gap_start,
+                                    gap_end,
+                                    props.duration_ms,
+                                    props.px_per_second,
+                                );
+                                let start_px = g_start.to_secs() * props.px_per_second.as_f64();
+                                let end_px = g_end.to_secs() * props.px_per_second.as_f64();
+                                let width_px = (end_px - start_px).max(1.0);
+                                
+                                html! {
+                                    <div 
+                                        class="lyric-chunk ghost-chunk"
+                                        style={format!("left: {}px; width: {}px;", start_px, width_px)}
+                                    >
+                                        { "+" }
+                                    </div>
+                                }
+                            } else {
+                                html! {}
+                            }
                         } else {
                             html! {}
                         }

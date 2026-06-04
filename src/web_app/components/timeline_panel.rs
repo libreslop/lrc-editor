@@ -42,6 +42,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let is_scrollbar_dragged = use_mut_ref(|| false);
     let last_mouse_pos = use_mut_ref(|| crate::domain::Vec2 { x: 0.0, y: 0.0 });
 
+    let hover_lyrics_time = use_state(|| None::<TimeMs>);
+    let drag_create_start = use_state(|| None::<TimeMs>);
+    let drag_create_current = use_state(|| None::<TimeMs>);
+
     let file_handlers = crate::web_app::components::timeline::hooks::use_file_handlers(
         props.state.clone(),
         audio_url.clone(),
@@ -793,6 +797,72 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         })
     };
 
+    let on_mousedown_lyrics = {
+        let drag_mode = drag_mode.clone();
+        let drag_create_start = drag_create_start.clone();
+        let drag_create_current = drag_create_current.clone();
+        let viewport_ref = viewport_ref.clone();
+        let px_per_second = px_per_second;
+        let state = props.state.clone();
+        
+        Callback::from(move |e: MouseEvent| {
+            e.stop_propagation();
+            if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                let _ = viewport.focus();
+                let rect = viewport.get_bounding_client_rect();
+                let x = e.client_x() as f64 - rect.left() + viewport.scroll_left() as f64;
+                let clicked_time = TimeMs(((x / px_per_second.as_f64()) * 1000.0) as u32);
+                let duration_ms = state.max_timeline_duration();
+                let snapped_start = crate::web_app::editor::timeline::TimelineSnapper::snap_playhead(
+                    &state,
+                    clicked_time,
+                    duration_ms,
+                    px_per_second,
+                );
+                drag_mode.set(Some(DragTarget::CreateChunk));
+                drag_create_start.set(Some(snapped_start));
+                drag_create_current.set(Some(snapped_start));
+            }
+        })
+    };
+
+    let on_mousemove_lyrics = {
+        let drag_mode = drag_mode.clone();
+        let drag_create_current = drag_create_current.clone();
+        let hover_lyrics_time = hover_lyrics_time.clone();
+        let viewport_ref = viewport_ref.clone();
+        let px_per_second = px_per_second;
+        let state = props.state.clone();
+        
+        Callback::from(move |e: MouseEvent| {
+            if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                let rect = viewport.get_bounding_client_rect();
+                let x = e.client_x() as f64 - rect.left() + viewport.scroll_left() as f64;
+                let current_time = TimeMs(((x / px_per_second.as_f64()) * 1000.0) as u32);
+                
+                if *drag_mode == Some(DragTarget::CreateChunk) {
+                    let duration_ms = state.max_timeline_duration();
+                    let snapped_current = crate::web_app::editor::timeline::TimelineSnapper::snap_playhead(
+                        &state,
+                        current_time,
+                        duration_ms,
+                        px_per_second,
+                    );
+                    drag_create_current.set(Some(snapped_current));
+                } else {
+                    hover_lyrics_time.set(Some(current_time));
+                }
+            }
+        })
+    };
+
+    let on_mouseleave_lyrics = {
+        let hover_lyrics_time = hover_lyrics_time.clone();
+        Callback::from(move |_| {
+            hover_lyrics_time.set(None);
+        })
+    };
+
     let on_mousemove = {
         let drag_mode = drag_mode.clone();
         let drag_start_x = drag_start_x.clone();
@@ -807,6 +877,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let scroll_left_state = scroll_left.clone();
         let state = props.state.clone();
         let current_time_ms_ref = current_time_ms_ref.clone();
+        let drag_create_current = drag_create_current.clone();
 
         let drag_scrollbar_handle_offset = drag_scrollbar_handle_offset.clone();
         let viewport_width = viewport_width.clone();
@@ -916,6 +987,20 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             ));
                         }
                     }
+                } else if mode == DragTarget::CreateChunk {
+                    if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                        let rect = v.get_bounding_client_rect();
+                        let x = e.client_x() as f64 - rect.left() + v.scroll_left() as f64;
+                        let current_time = TimeMs(((x / px_per_second_ref.borrow().as_f64()) * 1000.0) as u32);
+                        let duration_ms = state.max_timeline_duration();
+                        let snapped_current = crate::web_app::editor::timeline::TimelineSnapper::snap_playhead(
+                            &state,
+                            current_time,
+                            duration_ms,
+                            *px_per_second_ref.borrow(),
+                        );
+                        drag_create_current.set(Some(snapped_current));
+                    }
                 } else {
                     let px = px_per_second_ref.borrow().as_f64();
                     let delta_ms = (delta_x / px * 1000.0) as i32;
@@ -947,6 +1032,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let scroll_left = scroll_left.clone();
         let suppress_panning = suppress_panning.clone();
         let current_time_ms_ref = current_time_ms_ref.clone();
+        let drag_create_start = drag_create_start.clone();
+        let drag_create_current = drag_create_current.clone();
+        let hover_lyrics_time = hover_lyrics_time.clone();
+        let px_per_second_ref = px_per_second_ref.clone();
         
         Callback::from(move |e: MouseEvent| {
             *is_scrollbar_dragged.borrow_mut() = false;
@@ -1036,6 +1125,37 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
                             scroll_left.set(v.scroll_left() as f64);
                         }
+                    }
+                    DragTarget::CreateChunk => {
+                        let start_opt = *drag_create_start;
+                        let current_opt = *drag_create_current;
+                        
+                        if let (Some(start), Some(current)) = (start_opt, current_opt) {
+                            if start == current {
+                                if let Some(hover_t) = *hover_lyrics_time {
+                                    let doc = state.document.document.as_ref();
+                                    let duration_ms = state.max_timeline_duration();
+                                    let gap = crate::web_app::editor::timeline::find_gap(doc, hover_t, duration_ms);
+                                    if let Some((gap_start, gap_end)) = gap {
+                                        let (ghost_start, ghost_end) = crate::web_app::editor::timeline::calculate_ghost_chunk(
+                                            &state,
+                                            hover_t,
+                                            gap_start,
+                                            gap_end,
+                                            duration_ms,
+                                            *px_per_second_ref.borrow(),
+                                        );
+                                        state.dispatch(AppAction::AddChunk(ghost_start, ghost_end));
+                                    }
+                                }
+                            } else {
+                                let start_t = start.min(current);
+                                let end_t = start.max(current);
+                                state.dispatch(AppAction::AddChunk(start_t, end_t));
+                            }
+                        }
+                        drag_create_start.set(None);
+                        drag_create_current.set(None);
                     }
                 }
                 drag_mode.set(None);
@@ -1171,6 +1291,12 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     on_import_audio={import_click}
                     on_chunk_drag_start={on_chunk_drag_start}
                     selection_rect={*selection_rect}
+                    hover_lyrics_time={*hover_lyrics_time}
+                    drag_create_start={*drag_create_start}
+                    drag_create_current={*drag_create_current}
+                    on_mousedown_lyrics={on_mousedown_lyrics}
+                    on_mousemove_lyrics={on_mousemove_lyrics}
+                    on_mouseleave_lyrics={on_mouseleave_lyrics}
                 />
             </div>
         </div>

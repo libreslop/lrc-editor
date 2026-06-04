@@ -751,6 +751,33 @@ svg {
   background: rgba(43, 116, 227, 0.2);
 }
 
+.lyric-chunk.ghost-chunk {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1.5px dashed rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.65);
+  box-shadow: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding-top: 0;
+  font-size: 16px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.lyric-chunk.drag-create-chunk {
+  background: rgba(139, 104, 246, 0.25);
+  border: 1.5px dashed var(--selection);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding-top: 0;
+  font-style: italic;
+  pointer-events: none;
+}
+
 .edge-handle {
   position: absolute;
   top: 0;

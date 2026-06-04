@@ -20,4 +20,5 @@ pub enum DragTarget {
     Playhead,
     Selection,
     Scrollbar,
+    CreateChunk,
 }

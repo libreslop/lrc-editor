@@ -20,6 +20,7 @@ pub enum AppAction {
     DeleteSelected,
     ShiftSelected(i32),
     ShiftBoundary(usize, bool, bool, i32), // id, is_left, both, delta
+    AddChunk(TimeMs, TimeMs),
 }
 
 #[derive(PartialEq, Clone)]
@@ -292,6 +293,27 @@ impl Reducible for AppState {
                         new_state.history.history.truncate(new_state.history.history_index + 1);
                         new_state.history.history.push(text);
                         new_state.history.history_index = new_state.history.history.len() - 1;
+                    }
+                }
+            }
+            AppAction::AddChunk(start, end) => {
+                if start < end {
+                    let doc_to_use = new_state.document.document.clone().unwrap_or_else(|| {
+                        LrcDocument::new(vec![], vec![], 0)
+                    });
+                    let timeline_duration_ms = new_state.max_timeline_duration();
+                    let editor = crate::web_app::editor::timeline::TimelineEditor::new(&doc_to_use);
+                    let text = editor.add_chunk(start, end, timeline_duration_ms);
+                    
+                    let new_uid = new_state.document.next_uid;
+                    
+                    new_state.update_document(text.clone());
+                    new_state.history.history.truncate(new_state.history.history_index + 1);
+                    new_state.history.history.push(text);
+                    new_state.history.history_index = new_state.history.history.len() - 1;
+                    
+                    if let Some(new_doc) = &new_state.document.document {
+                        new_state.view.selection.select_entry(new_doc, new_uid, SelectionMode::Replace);
                     }
                 }
             }
