@@ -1,75 +1,18 @@
 use yew::prelude::*;
-use web_sys::{HtmlAudioElement, HtmlInputElement, HtmlCanvasElement, Url, AudioContext, Request, RequestInit, RequestMode, Response};
-use wasm_bindgen_futures::{spawn_local, JsFuture};
+use web_sys::{HtmlAudioElement, HtmlInputElement, Url};
 use wasm_bindgen::JsCast;
-use crate::web_app::app::{AppState, AppAction};
-use crate::domain::SelectionMode;
-
-fn draw_waveform(canvas: HtmlCanvasElement, url: String) {
-    spawn_local(async move {
-        let mut opts = RequestInit::new();
-        opts.set_method("GET");
-        opts.set_mode(RequestMode::Cors);
-        let request = Request::new_with_str_and_init(&url, &opts).unwrap();
-        let window = web_sys::window().unwrap();
-        
-        let resp_value = JsFuture::from(window.fetch_with_request(&request)).await.unwrap();
-        let resp: Response = resp_value.dyn_into().unwrap();
-        let array_buffer = JsFuture::from(resp.array_buffer().unwrap()).await.unwrap();
-        
-        let audio_ctx = AudioContext::new().unwrap();
-        let audio_buffer_promise = audio_ctx.decode_audio_data(&array_buffer.into()).unwrap();
-        let audio_buffer_value = JsFuture::from(audio_buffer_promise).await.unwrap();
-        let audio_buffer: web_sys::AudioBuffer = audio_buffer_value.dyn_into().unwrap();
-        
-        let ctx = canvas
-            .get_context("2d")
-            .unwrap()
-            .unwrap()
-            .dyn_into::<web_sys::CanvasRenderingContext2d>()
-            .unwrap();
-            
-        let width = canvas.width() as f64;
-        let height = canvas.height() as f64;
-        ctx.clear_rect(0.0, 0.0, width, height);
-        ctx.set_fill_style_str("#1fb7b0"); // --teal
-        
-        if let Ok(data) = audio_buffer.get_channel_data(0) {
-            let step = (data.len() as f64 / width).ceil() as usize;
-            let amp = height / 2.0;
-            
-            for i in 0..(width as usize) {
-                let mut min = 1.0f32;
-                let mut max = -1.0f32;
-                for j in 0..step {
-                    let idx = i * step + j;
-                    if idx < data.len() {
-                        let val = data[idx];
-                        if val < min { min = val; }
-                        if val > max { max = val; }
-                    }
-                }
-                ctx.fill_rect(i as f64, amp as f64 + (min as f64 * amp), 1.0, (max - min) as f64 * amp);
-            }
-        }
-    });
-}
+use crate::web_app::actions::{AppState, AppAction};
+use crate::domain::{TimeMs, Pixels};
+use super::timeline::{PlaybackControls, TrackPads, TimelineLanes, DragTarget};
 
 #[derive(Properties, PartialEq)]
 pub struct TimelinePanelProps {
     pub state: UseReducerHandle<AppState>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum DragMode {
-    Body,
-    LeftEdge,
-    RightEdge,
-}
-
 #[function_component(TimelinePanel)]
 pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
-    let px_per_second = 92.0 * props.state.zoom_level;
+    let px_per_second = Pixels(92.0 * props.state.zoom_level);
     
     let audio_ref = use_node_ref();
     let file_input_ref = use_node_ref();
@@ -81,8 +24,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     
     let audio_url = use_state(|| None::<String>);
 
-    let drag_mode = use_state(|| None::<DragMode>);
-    let drag_start_x = use_state(|| 0.0);
+    let drag_mode = use_state(|| None::<DragTarget>);
+    let drag_start_x = use_state(|| Pixels(0.0));
     let drag_offset_ms = use_state(|| 0i32);
     let drag_target_id = use_state(|| None::<usize>);
     let is_scrollbar_dragged = use_mut_ref(|| false);
@@ -110,17 +53,16 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         })
     };
 
-    // Removed on_time_update and on_ended because we now use a custom 16ms interval
-    // to drive the playhead, which allows it to continue moving past the audio duration.
-    
     let on_loaded_metadata = {
         let state = props.state.clone();
         Callback::from(move |e: Event| {
             if let Some(audio) = e.target_dyn_into::<web_sys::HtmlAudioElement>() {
-                state.dispatch(AppAction::SetDuration((audio.duration() * 1000.0) as u32));
+                state.dispatch(AppAction::SetDuration(TimeMs((audio.duration() * 1000.0) as u32)));
             }
         })
     };
+
+    // Playback loop effect
     {
         let playing = props.state.playing;
         let audio_ref = audio_ref.clone();
@@ -129,18 +71,18 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let current_time_ref = yew::use_mut_ref(|| props.state.current_time_ms);
         *current_time_ref.borrow_mut() = props.state.current_time_ms;
 
-        let bounds_ref = yew::use_mut_ref(|| (0u32, 0u32));
+        let bounds_ref = yew::use_mut_ref(|| (TimeMs(0), TimeMs(0)));
         *bounds_ref.borrow_mut() = {
             let audio_dur = props.state.duration_ms;
             let last_nonempty = props.state.document.as_ref().and_then(|d| {
                 d.entries().iter().rev().find(|e| !e.is_empty()).map(|e| e.time_ms())
-            }).unwrap_or(0);
+            }).unwrap_or(TimeMs(0));
             
-            let last_lyric = props.state.document.as_ref().and_then(|d| d.last_entry_time_ms()).unwrap_or(0);
-            let timeline_dur = audio_dur.max(last_lyric) + 10000;
+            let last_lyric = props.state.document.as_ref().and_then(|d| d.last_entry_time_ms()).unwrap_or(TimeMs(0));
+            let timeline_dur = TimeMs(audio_dur.as_u32().max(last_lyric.as_u32()) + 10000);
             
-            let base_max = if last_nonempty > audio_dur {
-                last_nonempty + 10000
+            let base_max = if last_nonempty.as_u32() > audio_dur.as_u32() {
+                TimeMs(last_nonempty.as_u32() + 10000)
             } else {
                 audio_dur
             };
@@ -158,7 +100,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 
                 if let Some(audio) = audio_ref.cast::<web_sys::HtmlAudioElement>() {
                     let audio_dur_ms = (audio.duration() * 1000.0) as u32;
-                    if start_time < audio_dur_ms {
+                    if start_time.as_u32() < audio_dur_ms {
                         let _ = audio.play();
                     }
                 }
@@ -185,24 +127,24 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     let mut synced = false;
                     if let Some(audio) = audio_ref.cast::<web_sys::HtmlAudioElement>() {
                         let audio_dur_ms = (audio.duration() * 1000.0) as u32;
-                        if local_current < audio_dur_ms && !audio.paused() && !audio.ended() {
-                            local_current = (audio.current_time() * 1000.0) as u32;
+                        if local_current.as_u32() < audio_dur_ms && !audio.paused() && !audio.ended() {
+                            local_current = TimeMs((audio.current_time() * 1000.0) as u32);
                             synced = true;
                         }
                     }
                     
                     if !synced {
-                        local_current += delta as u32;
+                        local_current = TimeMs(local_current.as_u32() + delta as u32);
                     }
                     
                     let (base_max, timeline_dur) = *bounds_ref.borrow();
-                    let max_dur = if start_time >= base_max {
+                    let max_dur = if start_time.as_u32() >= base_max.as_u32() {
                         timeline_dur
                     } else {
                         base_max
                     };
                     
-                    if local_current >= max_dur {
+                    if local_current.as_u32() >= max_dur.as_u32() {
                         local_current = max_dur;
                         state.dispatch(AppAction::SetTime(local_current));
                         state.dispatch(AppAction::TogglePlay);
@@ -231,33 +173,17 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         use_effect_with(last_seek, move |seek| {
             if let Some(time_ms) = seek {
                 if let Some(audio) = audio_ref.cast::<HtmlAudioElement>() {
-                    audio.set_current_time(*time_ms as f64 / 1000.0);
+                    audio.set_current_time(time_ms.to_secs());
                 }
             }
             || ()
         });
     }
 
-    let last_lyric_ms = props.state.document.as_ref().and_then(|doc| doc.last_entry_time_ms()).unwrap_or(0);
-    let duration_ms = props.state.duration_ms.max(last_lyric_ms) + 10000;
-    let width_px = (duration_ms as f64 / 1000.0) * px_per_second;
-    let audio_width_px = (props.state.duration_ms as f64 / 1000.0) * px_per_second;
-
-    // Draw waveform once duration is set and url is present
-    {
-        let url = (*audio_url).clone();
-        let canvas_ref = canvas_ref.clone();
-        use_effect_with((url.clone(), duration_ms), move |(url, _duration_ms)| {
-            if let Some(u) = url {
-                if let Some(canvas) = canvas_ref.cast::<HtmlCanvasElement>() {
-                    canvas.set_width(width_px as u32);
-                    canvas.set_height(canvas.client_height() as u32);
-                    draw_waveform(canvas, u.clone());
-                }
-            }
-            || ()
-        });
-    }
+    let last_lyric_ms = props.state.document.as_ref().and_then(|doc| doc.last_entry_time_ms()).unwrap_or(TimeMs(0));
+    let duration_ms = TimeMs(props.state.duration_ms.as_u32().max(last_lyric_ms.as_u32()) + 10000);
+    let width_px = Pixels(duration_ms.to_secs() * px_per_second.as_f64());
+    let audio_width_px = Pixels(props.state.duration_ms.to_secs() * px_per_second.as_f64());
 
     let on_viewport_scroll = {
         let scrollbar_ref = scrollbar_ref.clone();
@@ -308,8 +234,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let old_px_per_second = 92.0 * zoom;
             let new_zoom = zoom * 1.25;
             let new_px_per_second = 92.0 * new_zoom;
-            let playhead_x_old = (current_time_ms as f64 / 1000.0) * old_px_per_second;
-            let playhead_x_new = (current_time_ms as f64 / 1000.0) * new_px_per_second;
+            let playhead_x_old = current_time_ms.to_secs() * old_px_per_second;
+            let playhead_x_new = current_time_ms.to_secs() * new_px_per_second;
             
             let screen_x = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 playhead_x_old - vp.scroll_left() as f64
@@ -339,8 +265,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let old_px_per_second = 92.0 * zoom;
             let new_zoom = zoom / 1.25;
             let new_px_per_second = 92.0 * new_zoom;
-            let playhead_x_old = (current_time_ms as f64 / 1000.0) * old_px_per_second;
-            let playhead_x_new = (current_time_ms as f64 / 1000.0) * new_px_per_second;
+            let playhead_x_old = current_time_ms.to_secs() * old_px_per_second;
+            let playhead_x_new = current_time_ms.to_secs() * new_px_per_second;
             
             let screen_x = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 playhead_x_old - vp.scroll_left() as f64
@@ -361,14 +287,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         })
     };
 
-    let time_str = {
-        let total_secs = props.state.current_time_ms / 1000;
-        let mins = total_secs / 60;
-        let secs = total_secs % 60;
-        let ms = props.state.current_time_ms % 1000;
-        format!("{:02}:{:02}.{:03}", mins, secs, ms)
-    };
-
     // Smooth playhead & auto pan
     {
         let playing = props.state.playing;
@@ -376,8 +294,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let playhead_ref = playhead_ref.clone();
         let viewport_ref = viewport_ref.clone();
         let timecode_ref = timecode_ref.clone();
-        let px_per_second_ref = use_mut_ref(|| px_per_second);
-        *px_per_second_ref.borrow_mut() = px_per_second;
+        let px_per_second_val = px_per_second;
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
 
         use_effect_with(playing, move |playing| {
@@ -400,7 +317,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         playhead.cast::<web_sys::HtmlElement>(),
                         viewport.cast::<web_sys::HtmlElement>(),
                     ) {
-                        let px = *px_per_second_ref.borrow();
+                        let px = px_per_second_val.as_f64();
                         let ct = a.current_time();
                         let playhead_x = ct * px;
                         let _ = p.set_attribute("style", &format!("transform: translateX({}px);", playhead_x));
@@ -449,8 +366,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let rect = viewport.get_bounding_client_rect();
                 let x = e.client_x() as f64 - rect.left() + viewport.scroll_left() as f64;
-                let time = x / px_per_second;
-                state.dispatch(AppAction::Seek((time * 1000.0) as u32));
+                let time = x / px_per_second.as_f64();
+                state.dispatch(AppAction::Seek(TimeMs((time * 1000.0) as u32)));
             }
         })
     };
@@ -470,14 +387,12 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let drag_offset_ms = drag_offset_ms.clone();
         Callback::from(move |e: MouseEvent| {
             if drag_mode.is_some() {
-                let delta_x = e.client_x() as f64 - *drag_start_x;
-                let delta_ms = (delta_x / px_per_second * 1000.0) as i32;
+                let delta_x = e.client_x() as f64 - drag_start_x.as_f64();
+                let delta_ms = (delta_x / px_per_second.as_f64() * 1000.0) as i32;
                 drag_offset_ms.set(delta_ms);
             }
         })
     };
-
-    // on_global_mouseup handles global mouse ups, so we don't need on_mouseup on the viewport anymore.
 
     let on_scrollbar_mousedown = {
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
@@ -500,13 +415,13 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 let offset = *drag_offset_ms;
                 if offset != 0 {
                     match mode {
-                        DragMode::Body => state.dispatch(AppAction::ShiftSelected(offset)),
-                        DragMode::LeftEdge => {
+                        DragTarget::Body => state.dispatch(AppAction::ShiftSelected(offset)),
+                        DragTarget::LeftEdge => {
                             if let Some(id) = *drag_target_id {
                                 state.dispatch(AppAction::ShiftBoundary(id, true, offset));
                             }
                         }
-                        DragMode::RightEdge => {
+                        DragTarget::RightEdge => {
                             if let Some(id) = *drag_target_id {
                                 state.dispatch(AppAction::ShiftBoundary(id, false, offset));
                             }
@@ -517,6 +432,17 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 drag_offset_ms.set(0);
                 drag_target_id.set(None);
             }
+        })
+    };
+
+    let on_chunk_drag_start = {
+        let drag_mode = drag_mode.clone();
+        let drag_start_x = drag_start_x.clone();
+        let drag_target_id = drag_target_id.clone();
+        Callback::from(move |(id, e, target): (usize, MouseEvent, DragTarget)| {
+            drag_mode.set(Some(target));
+            drag_start_x.set(Pixels(e.client_x() as f64));
+            drag_target_id.set(Some(id));
         })
     };
 
@@ -542,189 +468,42 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     html! {}
                 }
             }
-            <div class="transport-strip">
-                <span class="timecode" ref={timecode_ref}>{ time_str }</span>
-                <button class="transport-button" title={if props.state.playing { "Pause" } else { "Play" }} onclick={toggle_play}>
-                    if props.state.playing {
-                        <svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-                    } else {
-                        <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                    }
-                </button>
-                <div class="zoom-controls">
-                    <button class="icon-button" title="Zoom Out" onclick={zoom_out}>
-                        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-                    </button>
-                    <button class="icon-button" title="Zoom In" onclick={zoom_in}>
-                        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-                    </button>
-                </div>
-            </div>
+            <PlaybackControls 
+                state={props.state.clone()}
+                timecode_ref={timecode_ref}
+                on_toggle_play={toggle_play}
+                on_zoom_in={zoom_in}
+                on_zoom_out={zoom_out}
+            />
             <div class="timeline-body">
-                <div class="track-pads">
-                    <div class="track-pad ruler-pad"></div>
-                    <div class="track-pad audio-pad">
-                        <button class="icon-button track-button" title="Import Audio" onclick={import_click.clone()}>
-                            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                        </button>
-                    </div>
-                    <div class="track-pad lyrics-pad">
-                        <button class="icon-button track-button" title="Select All" onclick={select_all}>
-                            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                        </button>
-                    </div>
-                </div>
-                <div 
-                    class="timeline-viewport" 
-                    tabindex="0" 
-                    ref={viewport_ref} 
-                    onscroll={on_viewport_scroll}
-                    onkeydown={on_keydown}
-                    onmousemove={on_mousemove}
-                >
-                    <div class="timeline-content" style={format!("width: {}px;", width_px)} onmousedown={on_timeline_mousedown}>
-                        <div class="ruler"></div>
-                        <div class="track-lane audio-lane">
-                            <canvas ref={canvas_ref} class="waveform-canvas" style={format!("width: {}px;", audio_width_px)}></canvas>
-                            if audio_url.is_none() {
-                                <div class="import-audio-button" onclick={import_click}>
-                                    { "Import audio" }
-                                </div>
-                            }
-                        </div>
-                        <div class="track-lane lyrics-lane">
-                            {
-                                if let Some(doc) = &props.state.document {
-                                    doc.timeline_chunks(duration_ms).into_iter().filter(|chunk| !chunk.is_empty()).map(|chunk| {
-                                        let mut start_px = (chunk.start_ms() as f64 / 1000.0) * px_per_second;
-                                        let mut end_px = (chunk.end_ms() as f64 / 1000.0) * px_per_second;
-                                        
-                                        let is_selected = props.state.selection.contains(chunk.entry_id());
-                                        let is_drag_target = Some(chunk.entry_id()) == *drag_target_id;
-                                        
-                                        if let Some(mode) = *drag_mode {
-                                            let offset_px = (*drag_offset_ms as f64 / 1000.0) * px_per_second;
-                                            match mode {
-                                                DragMode::Body => {
-                                                    if is_selected {
-                                                        start_px += offset_px;
-                                                        end_px += offset_px;
-                                                    }
-                                                }
-                                                DragMode::LeftEdge => {
-                                                    if let Some(id) = *drag_target_id {
-                                                        if id == chunk.entry_id() {
-                                                            start_px += offset_px;
-                                                        } else if Some(chunk.entry_id()) == doc.previous_entry_id(id) {
-                                                            end_px += offset_px;
-                                                        }
-                                                    }
-                                                }
-                                                DragMode::RightEdge => {
-                                                    if let Some(id) = *drag_target_id {
-                                                        if id == chunk.entry_id() {
-                                                            end_px += offset_px;
-                                                        } else if doc.previous_entry_id(chunk.entry_id()) == Some(id) {
-                                                            start_px += offset_px;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        let width = (end_px - start_px).max(1.0);
-                                        
-                                        let mut classes = classes!("lyric-chunk");
-                                        if is_selected { classes.push("selected"); }
-                                        if chunk.is_empty() { classes.push("empty-gap"); }
-                                        
-                                        let onmousedown_body = {
-                                            let drag_mode = drag_mode.clone();
-                                            let drag_start_x = drag_start_x.clone();
-                                            let drag_target_id = drag_target_id.clone();
-                                            let id = chunk.entry_id();
-                                            let state = props.state.clone();
-                                            let is_selected = is_selected;
-                                            Callback::from(move |e: MouseEvent| {
-                                                e.stop_propagation();
-                                                
-                                                let mut mode = SelectionMode::Replace;
-                                                let mut should_select = !is_selected;
-                                                
-                                                if e.shift_key() {
-                                                    mode = SelectionMode::Range;
-                                                    should_select = true;
-                                                } else if e.ctrl_key() || e.meta_key() {
-                                                    mode = SelectionMode::Toggle;
-                                                    should_select = true;
-                                                }
-                                                
-                                                if should_select {
-                                                    state.dispatch(AppAction::SelectEntry(id, mode));
-                                                }
-                                                
-                                                drag_mode.set(Some(DragMode::Body));
-                                                drag_start_x.set(e.client_x() as f64);
-                                                drag_target_id.set(Some(id));
-                                            })
-                                        };
-                                        
-                                        let onmousedown_left = {
-                                            let drag_mode = drag_mode.clone();
-                                            let drag_start_x = drag_start_x.clone();
-                                            let drag_target_id = drag_target_id.clone();
-                                            let id = chunk.entry_id();
-                                            let state = props.state.clone();
-                                            Callback::from(move |e: MouseEvent| {
-                                                e.stop_propagation();
-                                                state.dispatch(AppAction::ClearSelection);
-                                                drag_mode.set(Some(DragMode::LeftEdge));
-                                                drag_start_x.set(e.client_x() as f64);
-                                                drag_target_id.set(Some(id));
-                                            })
-                                        };
-
-                                        let onmousedown_right = {
-                                            let drag_mode = drag_mode.clone();
-                                            let drag_start_x = drag_start_x.clone();
-                                            let drag_target_id = drag_target_id.clone();
-                                            let id = chunk.entry_id();
-                                            let state = props.state.clone();
-                                            Callback::from(move |e: MouseEvent| {
-                                                e.stop_propagation();
-                                                state.dispatch(AppAction::ClearSelection);
-                                                drag_mode.set(Some(DragMode::RightEdge));
-                                                drag_start_x.set(e.client_x() as f64);
-                                                drag_target_id.set(Some(id));
-                                            })
-                                        };
-
-                                        html! {
-                                            <div 
-                                                class={classes} 
-                                                style={format!("left: {}px; width: {}px;", start_px, width)}
-                                                onmousedown={onmousedown_body}
-                                            >
-                                                { chunk.text() }
-                                                <div class="edge-handle left" onmousedown={onmousedown_left}></div>
-                                                <div class="edge-handle right" onmousedown={onmousedown_right}></div>
-                                            </div>
-                                        }
-                                    }).collect::<Html>()
-                                } else {
-                                    html! {}
-                                }
-                            }
-                        </div>
-                        <div class="playhead" ref={playhead_ref} style={format!("transform: translateX({}px);", (props.state.current_time_ms as f64 / 1000.0) * px_per_second)}>
-                            <span></span>
-                        </div>
-                    </div>
-                </div>
+                <TrackPads 
+                    on_import_audio={import_click.clone()}
+                    on_select_all={select_all}
+                />
+                <TimelineLanes 
+                    state={props.state.clone()}
+                    viewport_ref={viewport_ref}
+                    canvas_ref={canvas_ref}
+                    playhead_ref={playhead_ref}
+                    audio_url={(*audio_url).clone()}
+                    duration_ms={duration_ms}
+                    width_px={width_px}
+                    audio_width_px={audio_width_px}
+                    px_per_second={px_per_second}
+                    drag_mode={*drag_mode}
+                    drag_offset_ms={*drag_offset_ms}
+                    drag_target_id={*drag_target_id}
+                    on_viewport_scroll={on_viewport_scroll}
+                    on_keydown={on_keydown}
+                    on_mousemove={on_mousemove}
+                    on_mousedown_content={on_timeline_mousedown}
+                    on_import_audio={import_click}
+                    on_chunk_drag_start={on_chunk_drag_start}
+                />
             </div>
             <div class="timeline-controls">
                 <div class="timeline-scroll" ref={scrollbar_ref} onscroll={on_scrollbar_scroll} onmousedown={on_scrollbar_mousedown}>
-                    <div style={format!("width: {}px; height: 1px;", width_px)}></div>
+                    <div style={format!("width: {}px; height: 1px;", width_px.as_f64())}></div>
                 </div>
             </div>
         </div>

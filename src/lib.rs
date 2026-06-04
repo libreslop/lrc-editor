@@ -1,6 +1,6 @@
 mod domain;
 
-pub use domain::{LrcDocument, LrcParser, LyricEntry, SelectionMode, SelectionState};
+pub use domain::{LrcDocument, LrcParser, LyricEntry, SelectionMode, SelectionState, TimeMs, Pixels};
 
 #[cfg(target_arch = "wasm32")]
 mod web_app;

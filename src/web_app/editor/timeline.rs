@@ -1,16 +1,16 @@
-use crate::domain::LrcDocument;
+use crate::domain::{LrcDocument, TimeMs};
 
 #[derive(Clone, Debug)]
 pub struct Interval {
-    pub start: u32,
-    pub end: u32,
+    pub start: TimeMs,
+    pub end: TimeMs,
     pub text: String,
     pub raw_text: String,
     pub id: usize,
     pub is_empty: bool,
 }
 
-pub fn shift_selected(doc: &LrcDocument, selected_ids: &[usize], delta_ms: i32, duration_ms: u32) -> String {
+pub fn shift_selected(doc: &LrcDocument, selected_ids: &[usize], delta_ms: i32, duration_ms: TimeMs) -> String {
     let chunks = doc.timeline_chunks(duration_ms);
     
     let mut moved = Vec::new();
@@ -27,8 +27,8 @@ pub fn shift_selected(doc: &LrcDocument, selected_ids: &[usize], delta_ms: i32, 
         };
         
         if selected_ids.contains(&c.entry_id()) {
-            i.start = (i.start as i32 + delta_ms).max(0) as u32;
-            i.end = (i.end as i32 + delta_ms).max(0) as u32;
+            i.start = TimeMs((i.start.as_u32() as i32 + delta_ms).max(0) as u32);
+            i.end = TimeMs((i.end.as_u32() as i32 + delta_ms).max(0) as u32);
             moved.push(i);
         } else {
             statics.push(i);
@@ -77,7 +77,7 @@ pub fn shift_selected(doc: &LrcDocument, selected_ids: &[usize], delta_ms: i32, 
     build_lrc(doc, final_intervals)
 }
 
-pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, delta_ms: i32, duration_ms: u32) -> String {
+pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, delta_ms: i32, duration_ms: TimeMs) -> String {
     let chunks = doc.timeline_chunks(duration_ms);
     let mut intervals = Vec::new();
     
@@ -98,7 +98,7 @@ pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, delta
     }
     
     if let Some(t) = boundary_time {
-        let new_t = (t as i32 + delta_ms).max(0) as u32;
+        let new_t = TimeMs((t.as_u32() as i32 + delta_ms).max(0) as u32);
         
         for i in &mut intervals {
             if i.start == t {
@@ -119,7 +119,7 @@ pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, delta
 
 fn build_lrc(doc: &LrcDocument, final_intervals: Vec<Interval>) -> String {
     let mut resolved = Vec::new();
-    let mut current_time = final_intervals.first().map(|i| i.start).unwrap_or(0);
+    let mut current_time = final_intervals.first().map(|i| i.start).unwrap_or(TimeMs(0));
 
     for i in final_intervals {
         if i.start > current_time {
@@ -161,18 +161,11 @@ fn build_lrc(doc: &LrcDocument, final_intervals: Vec<Interval>) -> String {
     }
     
     for i in &merged {
-        let mins = i.start / 60000;
-        let secs = (i.start % 60000) / 1000;
-        let hund = (i.start % 1000) / 10;
-        text.push_str(&format!("[{:02}:{:02}.{:02}]{}\n", mins, secs, hund, i.raw_text));
+        text.push_str(&format!("[{}]{}\n", i.start.as_timestamp(), i.raw_text));
     }
     
     if let Some(last) = merged.last() {
-        let end = last.end;
-        let mins = end / 60000;
-        let secs = (end % 60000) / 1000;
-        let hund = (end % 1000) / 10;
-        text.push_str(&format!("[{:02}:{:02}.{:02}]\n", mins, secs, hund));
+        text.push_str(&format!("[{}]\n", last.end.as_timestamp()));
     }
 
     text

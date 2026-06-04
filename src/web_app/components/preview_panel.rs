@@ -1,6 +1,6 @@
 use yew::prelude::*;
 use wasm_bindgen::JsCast;
-use crate::web_app::app::{AppState, AppAction};
+use crate::web_app::actions::{AppState, AppAction};
 use crate::domain::SelectionMode;
 
 #[derive(Properties, PartialEq)]
@@ -81,6 +81,7 @@ pub fn preview_panel(props: &PreviewPanelProps) -> Html {
             <div class="lyrics-preview" 
                 ref={preview_ref}
                 onwheel={disable_autoscroll_wheel} 
+                onmousedown={disable_autoscroll_mouse}
                 ontouchmove={disable_autoscroll_touch} 
                 onkeydown={disable_autoscroll_key}
             >

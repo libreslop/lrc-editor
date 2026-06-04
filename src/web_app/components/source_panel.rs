@@ -1,9 +1,8 @@
 use yew::prelude::*;
-use crate::web_app::app::{AppState, AppAction};
+use crate::web_app::actions::{AppState, AppAction};
 use web_sys::{HtmlTextAreaElement, HtmlInputElement};
 use wasm_bindgen_futures::spawn_local;
 use wasm_bindgen_futures::JsFuture;
-use wasm_bindgen::JsCast;
 
 #[derive(Properties, PartialEq)]
 pub struct SourcePanelProps {
