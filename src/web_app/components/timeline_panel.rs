@@ -441,6 +441,38 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         });
     }
 
+    // Global keyboard shortcuts (Delete/Backspace to delete, Esc to deselect)
+    {
+        let state = props.state.clone();
+        use_effect_with((), move |_| {
+            let state_clone = state.clone();
+            let listener = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
+                // Ignore if currently typing in an input, textarea, or contenteditable element
+                let document = web_sys::window().unwrap().document().unwrap();
+                if let Some(active_element) = document.active_element() {
+                    let tag_name = active_element.tag_name().to_uppercase();
+                    if tag_name == "INPUT" || tag_name == "TEXTAREA" || active_element.has_attribute("contenteditable") {
+                        return;
+                    }
+                }
+
+                let key = e.key();
+                if key == "Delete" || key == "Backspace" {
+                    state_clone.dispatch(AppAction::DeleteSelected);
+                } else if key == "Escape" {
+                    state_clone.dispatch(AppAction::ClearSelection);
+                }
+            }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+            let window = web_sys::window().unwrap();
+            window.add_event_listener_with_callback("keydown", listener.as_ref().unchecked_ref()).unwrap();
+
+            move || {
+                window.remove_event_listener_with_callback("keydown", listener.as_ref().unchecked_ref()).unwrap();
+            }
+        });
+    }
+
     // Keep viewport dimensions updated when layout constraints change (zoom/duration)
     {
         let viewport_ref = viewport_ref.clone();
