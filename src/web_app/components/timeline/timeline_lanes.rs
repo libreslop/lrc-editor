@@ -31,8 +31,6 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
     let state = &props.state;
     let doc = state.document.as_ref();
 
-    let playhead_x = state.current_time_ms.to_secs() * props.px_per_second.as_f64();
-
     html! {
         <div 
             class="timeline-viewport" 
@@ -124,9 +122,9 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                         }
                     }
                 </div>
-                <div class="playhead" ref={props.playhead_ref.clone()} style={format!("transform: translateX({}px);", playhead_x)}>
-                    <span></span>
-                </div>
+            </div>
+            <div class="playhead" ref={props.playhead_ref.clone()}>
+                <span></span>
             </div>
         </div>
     }

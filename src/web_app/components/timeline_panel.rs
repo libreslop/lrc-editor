@@ -237,6 +237,29 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         });
     }
 
+    // Sync playhead visual position when not animating
+    {
+        let current_time_ms = props.state.current_time_ms;
+        let playing = props.state.playing;
+        let drag_mode = *drag_mode;
+        let playhead_ref = playhead_ref.clone();
+        let viewport_ref = viewport_ref.clone();
+        let px_per_second = px_per_second;
+
+        use_effect_with((current_time_ms, playing, drag_mode), move |(time, playing, mode)| {
+            if !*playing && *mode != Some(DragTarget::Playhead) {
+                if let (Some(p), _) = (
+                    playhead_ref.cast::<web_sys::HtmlElement>(),
+                    viewport_ref.cast::<web_sys::HtmlElement>(),
+                ) {
+                    let playhead_x = time.to_secs() * px_per_second.as_f64();
+                    let _ = p.set_attribute("style", &format!("transform: translateX({}px);", playhead_x));
+                }
+            }
+            || ()
+        });
+    }
+
     // Pan to playhead on seek (when paused)
     {
         let current_time_ms = props.state.current_time_ms;
@@ -374,6 +397,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let viewport_ref = viewport_ref.clone();
         let timecode_ref = timecode_ref.clone();
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
+        let last_mouse_pos = last_mouse_pos.clone();
         
         // Use the live reference for the RAF loop
         let current_time_ms_ref = current_time_ms_ref.clone();
@@ -392,23 +416,34 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let playhead = playhead_ref.clone();
             let viewport = viewport_ref.clone();
             let timecode = timecode_ref.clone();
+            let last_mouse_pos = last_mouse_pos.clone();
+            let is_dragging = *dragging_playhead;
 
-            if *playing || *dragging_playhead {
+            if *playing || is_dragging {
                 *cb_clone.borrow_mut() = Some(Closure::wrap(Box::new(move || {
                     if let (Some(p), Some(v)) = (
                         playhead.cast::<web_sys::HtmlElement>(),
                         viewport.cast::<web_sys::HtmlElement>(),
                     ) {
+                        let rect = v.get_bounding_client_rect();
                         let px = px_per_second_ref.borrow().as_f64();
                         let current_time_ms = *current_time_ms_ref.borrow();
-                        let playhead_x = current_time_ms.to_secs() * px;
+                        
+                        let playhead_x = if is_dragging {
+                            let (mouse_x, _) = *last_mouse_pos.borrow();
+                            mouse_x - rect.left() + v.scroll_left() as f64
+                        } else {
+                            current_time_ms.to_secs() * px
+                        };
+                        
                         let _ = p.set_attribute("style", &format!("transform: translateX({}px);", playhead_x));
 
-                        let scroll_left = v.scroll_left() as f64;
-                        let client_width = v.client_width() as f64;
-                        if !*is_scrollbar_dragged.borrow() {
-                            if playhead_x < scroll_left || playhead_x > scroll_left + client_width {
-                                v.set_scroll_left(playhead_x as i32);
+                        if !*is_scrollbar_dragged.borrow() && !is_dragging {
+                            let world_x = current_time_ms.to_secs() * px;
+                            let scroll_left = v.scroll_left() as f64;
+                            let client_width = v.client_width() as f64;
+                            if world_x < scroll_left || world_x > scroll_left + client_width {
+                                v.set_scroll_left(world_x as i32);
                             }
                         }
 
@@ -441,9 +476,27 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     }
 
     let on_timeline_mousedown = {
+        let drag_mode = drag_mode.clone();
+        let drag_start_x = drag_start_x.clone();
         let state = props.state.clone();
+        let viewport_ref = viewport_ref.clone();
+        let px_per_second = px_per_second;
+        let last_mouse_pos = last_mouse_pos.clone();
+        
         Callback::from(move |e: MouseEvent| {
             state.dispatch(AppAction::ClearSelection);
+            
+            // Move playhead to clicked position and start dragging
+            if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                let rect = viewport.get_bounding_client_rect();
+                let x = e.client_x() as f64 - rect.left() + viewport.scroll_left() as f64;
+                let target_time_ms = (x / px_per_second.as_f64() * 1000.0) as i32;
+                state.dispatch(AppAction::SetTime(TimeMs(target_time_ms.max(0) as u32)));
+                
+                drag_mode.set(Some(DragTarget::Playhead));
+                drag_start_x.set(Pixels(e.client_x() as f64));
+                *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
+            }
         })
     };
 
@@ -620,9 +673,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 />
                 <TimelineLanes 
                     state={props.state.clone()}
-                    viewport_ref={viewport_ref}
+                    viewport_ref={viewport_ref.clone()}
                     canvas_ref={canvas_ref}
-                    playhead_ref={playhead_ref}
+                    playhead_ref={playhead_ref.clone()}
                     audio_url={(*audio_url).clone()}
                     duration_ms={duration_ms}
                     width_px={width_px}
