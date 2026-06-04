@@ -429,6 +429,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let drag_start_x = drag_start_x.clone();
         let drag_start_scroll = drag_start_scroll.clone();
         let drag_scrollbar_track_width = drag_scrollbar_track_width.clone();
+        let is_scrollbar_dragged = is_scrollbar_dragged.clone();
 
         Callback::from(move |e: MouseEvent| {
             if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
@@ -440,6 +441,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 let is_handle = target.class_list().contains("custom-scrollbar-handle");
 
                 if is_handle {
+                    *is_scrollbar_dragged.borrow_mut() = true;
                     drag_mode.set(Some(DragTarget::Scrollbar));
                     drag_start_x.set(Pixels(e.client_x() as f64));
                     drag_start_scroll.set(*scroll_left_state);
@@ -452,6 +454,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     let new_scroll = vp.scroll_left() as f64;
                     scroll_left_state.set(new_scroll);
                     
+                    *is_scrollbar_dragged.borrow_mut() = true;
                     drag_mode.set(Some(DragTarget::Scrollbar));
                     drag_start_x.set(Pixels(e.client_x() as f64));
                     drag_start_scroll.set(new_scroll);
@@ -857,7 +860,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                 } else {
                                     crate::domain::SelectionMode::Replace
                                 };
-
+ 
                                 let chunks = doc.timeline_chunks(duration);
                                 let mut first = true;
                                 for chunk in chunks {
@@ -893,6 +896,46 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         })
     };
 
+    // Attach global window-level listeners when a drag is active
+    {
+        let drag_mode = drag_mode.clone();
+        let on_mousemove = on_mousemove.clone();
+        let on_global_mouseup = on_global_mouseup.clone();
+
+        use_effect_with(*drag_mode, move |mode| {
+            let mut mousemove_cb_opt = None;
+            let mut mouseup_cb_opt = None;
+
+            if mode.is_some() {
+                let window = web_sys::window().unwrap();
+
+                let on_mousemove_clone = on_mousemove.clone();
+                let mousemove_cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::MouseEvent| {
+                    on_mousemove_clone.emit(e);
+                }) as Box<dyn FnMut(web_sys::MouseEvent)>);
+
+                let on_global_mouseup_clone = on_global_mouseup.clone();
+                let mouseup_cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::MouseEvent| {
+                    on_global_mouseup_clone.emit(e);
+                }) as Box<dyn FnMut(web_sys::MouseEvent)>);
+
+                window.add_event_listener_with_callback("mousemove", mousemove_cb.as_ref().unchecked_ref()).unwrap();
+                window.add_event_listener_with_callback("mouseup", mouseup_cb.as_ref().unchecked_ref()).unwrap();
+
+                mousemove_cb_opt = Some(mousemove_cb);
+                mouseup_cb_opt = Some(mouseup_cb);
+            }
+
+            move || {
+                if let (Some(mm_cb), Some(mu_cb)) = (mousemove_cb_opt, mouseup_cb_opt) {
+                    let window = web_sys::window().unwrap();
+                    let _ = window.remove_event_listener_with_callback("mousemove", mm_cb.as_ref().unchecked_ref());
+                    let _ = window.remove_event_listener_with_callback("mouseup", mu_cb.as_ref().unchecked_ref());
+                }
+            }
+        });
+    }
+
     let on_chunk_drag_start = {
         let drag_mode = drag_mode.clone();
         let drag_start_x = drag_start_x.clone();
@@ -909,7 +952,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     };
 
     html! {
-        <div class="panel timeline-panel" onmouseup={on_global_mouseup.clone()} onmouseleave={on_global_mouseup.clone()}>
+        <div class="panel timeline-panel" onmouseup={on_global_mouseup.clone()}>
             <input 
                 type="file" 
                 accept="audio/*" 

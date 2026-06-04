@@ -46,7 +46,6 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
             onscroll={props.on_viewport_scroll.clone()}
             onwheel={props.on_wheel.clone()}
             onkeydown={props.on_keydown.clone()}
-            onmousemove={props.on_mousemove.clone()}
         >
             <div class="timeline-content" style={format!("width: {}px;", props.width_px.as_f64())} onmousedown={props.on_mousedown_content.clone()}>
                 <div class="ruler" onmousedown={props.on_mousedown_ruler.clone()}></div>
