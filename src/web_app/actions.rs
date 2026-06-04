@@ -296,6 +296,15 @@ impl Reducible for AppState {
                 }
             }
         }
+        
+        let was_empty = self.document.document.as_ref()
+            .map_or(true, |doc| doc.entries().iter().all(|entry| entry.is_empty()));
+        let is_empty = new_state.document.document.as_ref()
+            .map_or(true, |doc| doc.entries().iter().all(|entry| entry.is_empty()));
+        if is_empty && !was_empty {
+            new_state.playback.current_time_ms = TimeMs(0);
+        }
+
         Rc::new(new_state)
     }
 }

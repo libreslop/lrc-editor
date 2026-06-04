@@ -11,7 +11,10 @@ pub struct LrcDocument {
 }
 
 impl LrcDocument {
-    pub(crate) fn new(entries: Vec<LyricEntry>, metadata: Vec<MetadataTag>, line_count: usize) -> Self {
+    pub(crate) fn new(mut entries: Vec<LyricEntry>, metadata: Vec<MetadataTag>, line_count: usize) -> Self {
+        if entries.iter().all(|e| e.is_empty()) {
+            entries.clear();
+        }
         Self {
             entries,
             metadata,
@@ -102,6 +105,10 @@ impl LrcDocument {
 
     /// Regenerate the LRC source text from current metadata and entries.
     pub fn to_source_text(&self) -> String {
+        if self.entries.iter().all(|entry| entry.is_empty()) {
+            return String::new();
+        }
+
         let mut text = String::new();
         for tag in &self.metadata {
             text.push_str(&format!("[{}:{}]\n", tag.key(), tag.value()));
