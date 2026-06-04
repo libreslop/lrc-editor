@@ -18,4 +18,5 @@ pub enum DragTarget {
     Boundary,
     Playhead,
     Selection,
+    Scrollbar,
 }

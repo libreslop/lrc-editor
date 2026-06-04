@@ -37,6 +37,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let selection_rect = use_state(|| None::<(f64, f64, f64, f64)>);
     let drag_offset_ms = use_state(|| 0i32);
     let drag_target_uid = use_state(|| None::<usize>);
+    let drag_start_scroll = use_state(|| 0.0);
+    let drag_scrollbar_track_width = use_state(|| 1.0);
     let is_scrollbar_dragged = use_mut_ref(|| false);
     let last_mouse_pos = use_mut_ref(|| (0.0, 0.0));
 
@@ -423,14 +425,37 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let viewport_ref = viewport_ref.clone();
         let total_width = width_px.as_f64();
         let scroll_left_state = scroll_left.clone();
+        let drag_mode = drag_mode.clone();
+        let drag_start_x = drag_start_x.clone();
+        let drag_start_scroll = drag_start_scroll.clone();
+        let drag_scrollbar_track_width = drag_scrollbar_track_width.clone();
+
         Callback::from(move |e: MouseEvent| {
             if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                let rect = e.target_unchecked_into::<web_sys::HtmlElement>().get_bounding_client_rect();
-                let click_x = e.client_x() as f64 - rect.left();
-                let ratio = (click_x / rect.width()).clamp(0.0, 1.0);
-                let target_scroll = ratio * total_width - vp.client_width() as f64 / 2.0;
-                vp.set_scroll_left(target_scroll as i32);
-                scroll_left_state.set(vp.scroll_left() as f64);
+                let track_element = e.current_target().unwrap().dyn_into::<web_sys::HtmlElement>().unwrap();
+                let rect = track_element.get_bounding_client_rect();
+                drag_scrollbar_track_width.set(rect.width());
+                
+                let target = e.target().unwrap().dyn_into::<web_sys::HtmlElement>().unwrap();
+                let is_handle = target.class_list().contains("custom-scrollbar-handle");
+
+                if is_handle {
+                    drag_mode.set(Some(DragTarget::Scrollbar));
+                    drag_start_x.set(Pixels(e.client_x() as f64));
+                    drag_start_scroll.set(*scroll_left_state);
+                    e.stop_propagation();
+                } else {
+                    let click_x = e.client_x() as f64 - rect.left();
+                    let ratio = (click_x / rect.width()).clamp(0.0, 1.0);
+                    let target_scroll = ratio * total_width - vp.client_width() as f64 / 2.0;
+                    vp.set_scroll_left(target_scroll as i32);
+                    let new_scroll = vp.scroll_left() as f64;
+                    scroll_left_state.set(new_scroll);
+                    
+                    drag_mode.set(Some(DragTarget::Scrollbar));
+                    drag_start_x.set(Pixels(e.client_x() as f64));
+                    drag_start_scroll.set(new_scroll);
+                }
             }
         })
     };
@@ -712,6 +737,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let last_mouse_pos = last_mouse_pos.clone();
         let scroll_left_state = scroll_left.clone();
 
+        let drag_start_scroll = drag_start_scroll.clone();
+        let drag_scrollbar_track_width = drag_scrollbar_track_width.clone();
+
         Callback::from(move |e: MouseEvent| {
             *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
             
@@ -750,6 +778,13 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         let h = (current_y - start_y).abs();
                         
                         selection_rect.set(Some((x, y, w, h)));
+                    }
+                } else if mode == DragTarget::Scrollbar {
+                    if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                        let delta_scroll = (delta_x / *drag_scrollbar_track_width) * width_px.as_f64();
+                        let new_scroll = *drag_start_scroll + delta_scroll;
+                        v.set_scroll_left(new_scroll as i32);
+                        scroll_left_state.set(v.scroll_left() as f64);
                     }
                 } else {
                     let delta_ms = (delta_x / px_per_second.as_f64() * 1000.0) as i32;
@@ -849,6 +884,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         }
                         selection_rect.set(None);
                     }
+                    DragTarget::Scrollbar => {}
                 }
                 drag_mode.set(None);
                 drag_offset_ms.set(0);

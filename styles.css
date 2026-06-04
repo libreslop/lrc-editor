@@ -651,21 +651,11 @@ svg {
 }
 
 .lyric-chunk.color-4 {
-  background: #4b89df;
-  border-color: rgba(41, 74, 116, 0.8);
-}
-
-.lyric-chunk.color-5 {
-  background: #8e62df;
-  border-color: rgba(73, 50, 116, 0.8);
-}
-
-.lyric-chunk.color-6 {
   background: #df62a6;
   border-color: rgba(116, 50, 87, 0.8);
 }
 
-.lyric-chunk.color-7 {
+.lyric-chunk.color-5 {
   background: #8994a5;
   border-color: rgba(69, 74, 83, 0.8);
 }

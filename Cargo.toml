@@ -23,6 +23,7 @@ features = [
     "Clipboard",
     "Document",
     "DomRect",
+    "DomTokenList",
     "Element",
     "Event",
     "File",

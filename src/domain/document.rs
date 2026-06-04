@@ -165,9 +165,9 @@ pub fn reconcile_identity(
                 None
             };
             
-            let mut best_color = (prev_color.map(|c| c as usize).unwrap_or(7) + 1) % 8;
+            let mut best_color = (prev_color.map(|c| c as usize).unwrap_or(5) + 1) % 6;
             if Some(best_color as u8) == next_color {
-                best_color = (best_color + 1) % 8;
+                best_color = (best_color + 1) % 6;
             }
             new_entries[i].color_index = best_color as u8;
         }
