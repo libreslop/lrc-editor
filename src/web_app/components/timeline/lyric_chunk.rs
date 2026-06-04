@@ -1,6 +1,7 @@
 use yew::prelude::*;
 use crate::domain::{Pixels, SelectionMode};
 use crate::web_app::actions::{AppState, AppAction};
+use super::DragTarget;
 
 #[derive(Properties, PartialEq)]
 pub struct LyricChunkProps {
@@ -12,14 +13,6 @@ pub struct LyricChunkProps {
     pub width: Pixels,
     pub is_selected: bool,
     pub on_drag_start: Callback<(MouseEvent, DragTarget)>,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum DragTarget {
-    Body,
-    LeftEdge,
-    RightEdge,
-    Playhead,
 }
 
 #[function_component(LyricChunk)]

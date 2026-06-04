@@ -17,7 +17,7 @@ pub enum AppAction {
     SaveHistory(String),
     DeleteSelected,
     ShiftSelected(i32),
-    ShiftBoundary(usize, bool, i32),
+    ShiftBoundary(usize, bool, bool, i32), // id, is_left, both, delta
 }
 
 #[derive(PartialEq)]
@@ -201,7 +201,7 @@ impl Reducible for AppState {
                     }
                 }
             }
-            AppAction::ShiftBoundary(chunk_id, left_edge, delta_ms) => {
+            AppAction::ShiftBoundary(chunk_id, left_edge, both, delta_ms) => {
                 if delta_ms != 0 {
                     if let Some(doc) = &new_state.document {
                         let timeline_duration_ms = new_state.max_timeline_duration();
@@ -209,6 +209,7 @@ impl Reducible for AppState {
                             doc,
                             chunk_id,
                             left_edge,
+                            both,
                             delta_ms,
                             timeline_duration_ms
                         );

@@ -29,6 +29,7 @@ pub struct TimelineLanesProps {
     pub on_mousedown_ruler: Callback<MouseEvent>,
     pub on_import_audio: Callback<MouseEvent>,
     pub on_chunk_drag_start: Callback<(usize, MouseEvent, DragTarget)>,
+    pub selection_rect: Option<(f64, f64, f64, f64)>,
 }
 
 #[function_component(TimelineLanes)]
@@ -64,7 +65,10 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                 <div class="track-lane lyrics-lane">
                     {
                         if let Some(doc) = doc {
-                            doc.timeline_chunks(props.duration_ms).into_iter().filter(|chunk| !chunk.is_empty()).map(|chunk| {
+                            let chunks: Vec<_> = doc.timeline_chunks(props.duration_ms).into_iter().filter(|c| !c.is_empty()).collect();
+                            let mut chunk_html = Vec::new();
+                            
+                            for (index, chunk) in chunks.iter().enumerate() {
                                 let mut start_px = Pixels(chunk.start_ms().to_secs() * props.px_per_second.as_f64());
                                 let mut end_px = Pixels(chunk.end_ms().to_secs() * props.px_per_second.as_f64());
                                 
@@ -83,8 +87,6 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                                             if let Some(id) = props.drag_target_id {
                                                 if id == chunk.entry_id() {
                                                     start_px = Pixels(start_px.as_f64() + offset_px);
-                                                } else if Some(chunk.entry_id()) == doc.previous_entry_id(id) {
-                                                    end_px = Pixels(end_px.as_f64() + offset_px);
                                                 }
                                             }
                                         }
@@ -92,12 +94,21 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                                             if let Some(id) = props.drag_target_id {
                                                 if id == chunk.entry_id() {
                                                     end_px = Pixels(end_px.as_f64() + offset_px);
+                                                }
+                                            }
+                                        }
+                                        DragTarget::Boundary => {
+                                            if let Some(id) = props.drag_target_id {
+                                                if id == chunk.entry_id() {
+                                                    // Boundary after this chunk
+                                                    end_px = Pixels(end_px.as_f64() + offset_px);
                                                 } else if doc.previous_entry_id(chunk.entry_id()) == Some(id) {
+                                                    // This chunk is after the boundary
                                                     start_px = Pixels(start_px.as_f64() + offset_px);
                                                 }
                                             }
                                         }
-                                        DragTarget::Playhead => {}
+                                        DragTarget::Playhead | DragTarget::Selection => {}
                                     }
                                 }
 
@@ -110,7 +121,7 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                                     })
                                 };
 
-                                html! {
+                                chunk_html.push(html! {
                                     <LyricChunk 
                                         key={chunk.entry_id()}
                                         state={props.state.clone()}
@@ -120,16 +131,50 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                                         start_px={start_px}
                                         width={width}
                                         is_selected={is_selected}
-                                        on_drag_start={on_drag_start}
+                                        on_drag_start={on_drag_start.clone()}
                                     />
+                                });
+
+                                // Render boundary handle between this and next if adjacent
+                                if let Some(next) = chunks.get(index + 1) {
+                                    if !next.is_empty() && next.start_ms() == chunk.end_ms() {
+                                        let b_pos = end_px;
+                                        let on_b_mousedown = {
+                                            let on_drag_start = on_drag_start.clone();
+                                            Callback::from(move |e: MouseEvent| {
+                                                e.stop_propagation();
+                                                on_drag_start.emit((e, DragTarget::Boundary));
+                                            })
+                                        };
+                                        chunk_html.push(html! {
+                                            <div 
+                                                class="boundary-handle" 
+                                                style={format!("left: {}px;", b_pos.as_f64() - 4.0)}
+                                                onmousedown={on_b_mousedown}
+                                            ></div>
+                                        });
+                                    }
                                 }
-                            }).collect::<Html>()
+                            }
+                            chunk_html.into_iter().collect::<Html>()
                         } else {
                             html! {}
                         }
                     }
                 </div>
             </div>
+            {
+                if let Some((x, y, w, h)) = props.selection_rect {
+                    html! {
+                        <div 
+                            class="selection-rect" 
+                            style={format!("left: {}px; top: {}px; width: {}px; height: {}px;", x, y, w, h)}
+                        ></div>
+                    }
+                } else {
+                    html! {}
+                }
+            }
             <div class="playhead" ref={props.playhead_ref.clone()}>
                 <span></span>
             </div>

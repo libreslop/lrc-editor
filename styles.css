@@ -550,10 +550,34 @@ svg {
 
 .edge-handle.left {
   left: 0;
+  cursor: w-resize;
 }
 
 .edge-handle.right {
   right: 0;
+  cursor: e-resize;
+}
+
+.boundary-handle {
+  position: absolute;
+  top: 13px;
+  height: 54px;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 15;
+  background: transparent;
+}
+
+.boundary-handle:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.selection-rect {
+  position: absolute;
+  border: 1px solid var(--selection);
+  background: rgba(139, 104, 246, 0.2);
+  pointer-events: none;
+  z-index: 20;
 }
 
 .lyric-chunk.current {

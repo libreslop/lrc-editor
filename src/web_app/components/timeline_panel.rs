@@ -33,6 +33,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let drag_mode = use_state(|| None::<DragTarget>);
     let suppress_panning = use_state(|| false);
     let drag_start_x = use_state(|| Pixels(0.0));
+    let drag_start_y = use_state(|| Pixels(0.0));
+    let selection_rect = use_state(|| None::<(f64, f64, f64, f64)>);
     let drag_offset_ms = use_state(|| 0i32);
     let drag_target_id = use_state(|| None::<usize>);
     let is_scrollbar_dragged = use_mut_ref(|| false);
@@ -560,23 +562,22 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let on_timeline_mousedown = {
         let drag_mode = drag_mode.clone();
         let drag_start_x = drag_start_x.clone();
+        let drag_start_y = drag_start_y.clone();
         let state = props.state.clone();
         let viewport_ref = viewport_ref.clone();
-        let px_per_second = px_per_second;
         let last_mouse_pos = last_mouse_pos.clone();
         
         Callback::from(move |e: MouseEvent| {
             state.dispatch(AppAction::ClearSelection);
             
-            // Move playhead to clicked position and start dragging
             if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let rect = viewport.get_bounding_client_rect();
                 let x = e.client_x() as f64 - rect.left() + viewport.scroll_left() as f64;
-                let target_time_ms = (x / px_per_second.as_f64() * 1000.0) as i32;
-                state.dispatch(AppAction::SetTime(TimeMs(target_time_ms.max(0) as u32)));
+                let y = e.client_y() as f64 - rect.top();
                 
-                drag_mode.set(Some(DragTarget::Playhead));
-                drag_start_x.set(Pixels(e.client_x() as f64));
+                drag_mode.set(Some(DragTarget::Selection));
+                drag_start_x.set(Pixels(x));
+                drag_start_y.set(Pixels(y));
                 *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
             }
         })
@@ -618,6 +619,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let on_mousemove = {
         let drag_mode = drag_mode.clone();
         let drag_start_x = drag_start_x.clone();
+        let drag_start_y = drag_start_y.clone();
+        let selection_rect = selection_rect.clone();
         let drag_offset_ms = drag_offset_ms.clone();
         let viewport_ref = viewport_ref.clone();
         let pan_velocity = pan_velocity.clone();
@@ -646,6 +649,22 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             *pan_velocity.borrow_mut() = 0.0;
                         }
                     }
+                } else if mode == DragTarget::Selection {
+                    if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                        let rect = v.get_bounding_client_rect();
+                        let current_x = e.client_x() as f64 - rect.left() + v.scroll_left() as f64;
+                        let current_y = e.client_y() as f64 - rect.top();
+                        
+                        let start_x = drag_start_x.as_f64();
+                        let start_y = drag_start_y.as_f64();
+                        
+                        let x = start_x.min(current_x);
+                        let y = start_y.min(current_y);
+                        let w = (current_x - start_x).abs();
+                        let h = (current_y - start_y).abs();
+                        
+                        selection_rect.set(Some((x, y, w, h)));
+                    }
                 } else {
                     let delta_ms = (delta_x / px_per_second.as_f64() * 1000.0) as i32;
                     drag_offset_ms.set(delta_ms);
@@ -665,9 +684,11 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let drag_mode = drag_mode.clone();
         let drag_offset_ms = drag_offset_ms.clone();
         let drag_target_id = drag_target_id.clone();
+        let selection_rect = selection_rect.clone();
         let state = props.state.clone();
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
         let pan_velocity = pan_velocity.clone();
+        let px_per_second = px_per_second;
         
         Callback::from(move |_| {
             *is_scrollbar_dragged.borrow_mut() = false;
@@ -685,7 +706,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         let offset = *drag_offset_ms;
                         if offset != 0 {
                             if let Some(id) = *drag_target_id {
-                                state.dispatch(AppAction::ShiftBoundary(id, true, offset));
+                                state.dispatch(AppAction::ShiftBoundary(id, true, false, offset));
                             }
                         }
                     }
@@ -693,12 +714,43 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         let offset = *drag_offset_ms;
                         if offset != 0 {
                             if let Some(id) = *drag_target_id {
-                                state.dispatch(AppAction::ShiftBoundary(id, false, offset));
+                                state.dispatch(AppAction::ShiftBoundary(id, false, false, offset));
+                            }
+                        }
+                    }
+                    DragTarget::Boundary => {
+                        let offset = *drag_offset_ms;
+                        if offset != 0 {
+                            if let Some(id) = *drag_target_id {
+                                state.dispatch(AppAction::ShiftBoundary(id, false, true, offset));
                             }
                         }
                     }
                     DragTarget::Playhead => {
                         state.dispatch(AppAction::Seek(state.current_time_ms));
+                    }
+                    DragTarget::Selection => {
+                        if let Some((x, _y, w, _h)) = *selection_rect {
+                            if let Some(doc) = &state.document {
+                                let duration = state.max_timeline_duration();
+                                let start_time = TimeMs(((x / px_per_second.as_f64()) * 1000.0) as u32);
+                                let end_time = TimeMs((((x + w) / px_per_second.as_f64()) * 1000.0) as u32);
+                                
+                                let chunks = doc.timeline_chunks(duration);
+                                for chunk in chunks {
+                                    if !chunk.is_empty() {
+                                        let c_start = chunk.start_ms();
+                                        let c_end = chunk.end_ms();
+                                        
+                                        // Simple overlap check (horizontal only for now, as there's only one lane)
+                                        if c_start < end_time && c_end > start_time {
+                                            state.dispatch(AppAction::SelectEntry(chunk.entry_id(), crate::domain::SelectionMode::Toggle));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        selection_rect.set(None);
                     }
                 }
                 drag_mode.set(None);
@@ -776,6 +828,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     on_mousedown_ruler={on_ruler_mousedown}
                     on_import_audio={import_click}
                     on_chunk_drag_start={on_chunk_drag_start}
+                    selection_rect={*selection_rect}
                 />
             </div>
             <div class="timeline-controls">

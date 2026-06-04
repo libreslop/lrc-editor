@@ -31,6 +31,71 @@ pub fn shift_selected(doc: &LrcDocument, selected_ids: &[usize], delta_ms: i32, 
         }
     }
     
+    let final_intervals = resolve_overlaps(statics, moved);
+    build_lrc(doc, final_intervals)
+}
+
+pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, both: bool, delta_ms: i32, duration_ms: TimeMs) -> String {
+    let chunks = doc.timeline_chunks(duration_ms);
+    
+    let mut moved = Vec::new();
+    let mut statics = Vec::new();
+    
+    // Determine which chunks are "moved" (in terms of boundary change)
+    let mut moved_ids = vec![chunk_id];
+    if both {
+        if left_edge {
+            if let Some(prev_id) = doc.previous_entry_id(chunk_id) {
+                moved_ids.push(prev_id);
+            }
+        } else {
+            if let Some(next_id) = doc.next_entry_id(chunk_id) {
+                moved_ids.push(next_id);
+            }
+        }
+    }
+    
+    for c in chunks {
+        let mut i = Interval {
+            start: c.start_ms(),
+            end: c.end_ms(),
+            raw_text: c.raw_text().to_string(),
+            is_empty: c.is_empty(),
+        };
+        
+        if moved_ids.contains(&c.entry_id()) {
+            if c.entry_id() == chunk_id {
+                if left_edge {
+                    i.start = TimeMs((i.start.as_u32() as i32 + delta_ms).max(0) as u32);
+                } else {
+                    i.end = TimeMs((i.end.as_u32() as i32 + delta_ms).max(0) as u32);
+                }
+            } else {
+                // The other chunk in a "both" move
+                if left_edge {
+                    // moving start of chunk_id. This is the end of the previous chunk.
+                    i.end = TimeMs((i.end.as_u32() as i32 + delta_ms).max(0) as u32);
+                } else {
+                    // moving end of chunk_id. This is the start of the next chunk.
+                    i.start = TimeMs((i.start.as_u32() as i32 + delta_ms).max(0) as u32);
+                }
+            }
+            // Only push if still valid (start < end)
+            // But wait, if it's collapsed, we might still want to keep it as a "mover" that deletes others?
+            // Actually, if it's collapsed, it shouldn't exist anymore.
+            if i.end > i.start {
+                moved.push(i);
+            }
+        } else {
+            statics.push(i);
+        }
+    }
+    
+    let final_intervals = resolve_overlaps(statics, moved);
+    build_lrc(doc, final_intervals)
+}
+
+fn resolve_overlaps(statics: Vec<Interval>, moved: Vec<Interval>) -> Vec<Interval> {
     let mut next_static = Vec::new();
     for st in statics {
         let mut fragments = vec![st];
@@ -69,46 +134,7 @@ pub fn shift_selected(doc: &LrcDocument, selected_ids: &[usize], delta_ms: i32, 
     let mut final_intervals = next_static;
     final_intervals.extend(moved);
     final_intervals.sort_by_key(|i| i.start);
-    
-    build_lrc(doc, final_intervals)
-}
-
-pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, delta_ms: i32, duration_ms: TimeMs) -> String {
-    let chunks = doc.timeline_chunks(duration_ms);
-    let mut intervals = Vec::new();
-    
-    let mut boundary_time = None;
-    
-    for c in &chunks {
-        if c.entry_id() == chunk_id {
-            boundary_time = Some(if left_edge { c.start_ms() } else { c.end_ms() });
-        }
-        intervals.push(Interval {
-            start: c.start_ms(),
-            end: c.end_ms(),
-            raw_text: c.raw_text().to_string(),
-            is_empty: c.is_empty(),
-        });
-    }
-    
-    if let Some(t) = boundary_time {
-        let new_t = TimeMs((t.as_u32() as i32 + delta_ms).max(0) as u32);
-        
-        for i in &mut intervals {
-            if i.start == t {
-                i.start = new_t;
-            }
-            if i.end == t {
-                i.end = new_t;
-            }
-        }
-        
-        // Remove collapsed intervals
-        intervals.retain(|i| i.end > i.start);
-    }
-    
-    intervals.sort_by_key(|i| i.start);
-    build_lrc(doc, intervals)
+    final_intervals
 }
 
 fn build_lrc(doc: &LrcDocument, final_intervals: Vec<Interval>) -> String {
