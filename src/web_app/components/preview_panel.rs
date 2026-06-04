@@ -1,7 +1,6 @@
 use yew::prelude::*;
 use wasm_bindgen::JsCast;
 use crate::web_app::actions::{AppState, AppAction};
-use crate::domain::SelectionMode;
 
 #[derive(Properties, PartialEq)]
 pub struct PreviewPanelProps {
@@ -97,10 +96,8 @@ pub fn preview_panel(props: &PreviewPanelProps) -> Html {
                             
                             let onclick = {
                                 let state = props.state.clone();
-                                let id = entry.id();
                                 Callback::from(move |_| {
                                     state.dispatch(AppAction::Seek(time_ms));
-                                    state.dispatch(AppAction::SelectEntry(id, SelectionMode::Replace));
                                 })
                             };
 

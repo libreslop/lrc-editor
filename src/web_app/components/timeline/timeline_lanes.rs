@@ -21,6 +21,7 @@ pub struct TimelineLanesProps {
     pub on_keydown: Callback<KeyboardEvent>,
     pub on_mousemove: Callback<MouseEvent>,
     pub on_mousedown_content: Callback<MouseEvent>,
+    pub on_mousedown_ruler: Callback<MouseEvent>,
     pub on_import_audio: Callback<MouseEvent>,
     pub on_chunk_drag_start: Callback<(usize, MouseEvent, DragTarget)>,
 }
@@ -29,6 +30,12 @@ pub struct TimelineLanesProps {
 pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
     let state = &props.state;
     let doc = state.document.as_ref();
+
+    let mut playhead_x = state.current_time_ms.to_secs() * props.px_per_second.as_f64();
+    if props.drag_mode == Some(DragTarget::Playhead) {
+        let offset_px = (props.drag_offset_ms as f64 / 1000.0) * props.px_per_second.as_f64();
+        playhead_x = (playhead_x + offset_px).max(0.0);
+    }
 
     html! {
         <div 
@@ -40,7 +47,7 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
             onmousemove={props.on_mousemove.clone()}
         >
             <div class="timeline-content" style={format!("width: {}px;", props.width_px.as_f64())} onmousedown={props.on_mousedown_content.clone()}>
-                <div class="ruler"></div>
+                <div class="ruler" onmousedown={props.on_mousedown_ruler.clone()}></div>
                 <div class="track-lane audio-lane">
                     <WaveformCanvas 
                         canvas_ref={props.canvas_ref.clone()} 
@@ -89,6 +96,7 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                                                 }
                                             }
                                         }
+                                        DragTarget::Playhead => {}
                                     }
                                 }
 
@@ -120,7 +128,7 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                         }
                     }
                 </div>
-                <div class="playhead" ref={props.playhead_ref.clone()} style={format!("transform: translateX({}px);", state.current_time_ms.to_secs() * props.px_per_second.as_f64())}>
+                <div class="playhead" ref={props.playhead_ref.clone()} style={format!("transform: translateX({}px);", playhead_x)}>
                     <span></span>
                 </div>
             </div>

@@ -19,6 +19,7 @@ pub enum DragTarget {
     Body,
     LeftEdge,
     RightEdge,
+    Playhead,
 }
 
 #[function_component(LyricChunk)]

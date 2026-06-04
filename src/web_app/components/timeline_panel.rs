@@ -62,6 +62,35 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         })
     };
 
+    let pan_velocity = use_mut_ref(|| 0.0);
+    // Pan loop for auto-panning during drag
+    {
+        let pan_velocity = pan_velocity.clone();
+        let viewport_ref = viewport_ref.clone();
+        let drag_offset_ms = drag_offset_ms.clone();
+        let px_per_second = px_per_second;
+        let drag_mode = drag_mode.clone();
+
+        use_effect(move || {
+            let interval = gloo_timers::callback::Interval::new(16, move || {
+                let vel = *pan_velocity.borrow();
+                if vel != 0.0 && (*drag_mode).is_some() {
+                    if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                        let old_scroll = v.scroll_left();
+                        v.set_scroll_left(old_scroll + vel as i32);
+                        let actual_delta = v.scroll_left() - old_scroll;
+                        
+                        if actual_delta != 0 {
+                            let delta_ms = (actual_delta as f64 / px_per_second.as_f64() * 1000.0) as i32;
+                            drag_offset_ms.set(*drag_offset_ms + delta_ms);
+                        }
+                    }
+                }
+            });
+            move || drop(interval)
+        });
+    }
+
     // Playback loop effect
     {
         let playing = props.state.playing;
@@ -182,6 +211,28 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             if let Some(time_ms) = seek {
                 if let Some(audio) = audio_ref.cast::<HtmlAudioElement>() {
                     audio.set_current_time(time_ms.to_secs());
+                }
+            }
+            || ()
+        });
+    }
+
+    // Pan to playhead on seek (when paused)
+    {
+        let current_time_ms = props.state.current_time_ms;
+        let playing = props.state.playing;
+        let viewport_ref = viewport_ref.clone();
+        let px_per_second = px_per_second;
+        use_effect_with((current_time_ms, playing), move |(time, playing)| {
+            if !*playing {
+                if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                    let px = px_per_second.as_f64();
+                    let playhead_x = time.to_secs() * px;
+                    let scroll_left = v.scroll_left() as f64;
+                    let client_width = v.client_width() as f64;
+                    if playhead_x < scroll_left || playhead_x > scroll_left + client_width {
+                        v.set_scroll_left((playhead_x - client_width / 2.0) as i32);
+                    }
                 }
             }
             || ()
@@ -371,14 +422,31 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     let on_timeline_mousedown = {
         let state = props.state.clone();
+        Callback::from(move |e: MouseEvent| {
+            state.dispatch(AppAction::ClearSelection);
+        })
+    };
+
+    let on_ruler_mousedown = {
+        let drag_mode = drag_mode.clone();
+        let drag_start_x = drag_start_x.clone();
+        let drag_offset_ms = drag_offset_ms.clone();
+        let state = props.state.clone();
         let viewport_ref = viewport_ref.clone();
         let px_per_second = px_per_second;
+        
         Callback::from(move |e: MouseEvent| {
+            e.stop_propagation();
+            drag_mode.set(Some(DragTarget::Playhead));
+            drag_start_x.set(Pixels(e.client_x() as f64));
+            
+            // Make playhead jump to cursor immediately
             if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let rect = viewport.get_bounding_client_rect();
                 let x = e.client_x() as f64 - rect.left() + viewport.scroll_left() as f64;
-                let time = x / px_per_second.as_f64();
-                state.dispatch(AppAction::Seek(TimeMs((time * 1000.0) as u32)));
+                let target_time_ms = (x / px_per_second.as_f64() * 1000.0) as i32;
+                let current_time_ms = state.current_time_ms.as_u32() as i32;
+                drag_offset_ms.set(target_time_ms - current_time_ms);
             }
         })
     };
@@ -396,11 +464,41 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let drag_mode = drag_mode.clone();
         let drag_start_x = drag_start_x.clone();
         let drag_offset_ms = drag_offset_ms.clone();
+        let viewport_ref = viewport_ref.clone();
+        let pan_velocity = pan_velocity.clone();
+        let state = props.state.clone();
+        let px_per_second = px_per_second;
+
         Callback::from(move |e: MouseEvent| {
-            if drag_mode.is_some() {
+            if let Some(mode) = *drag_mode {
                 let delta_x = e.client_x() as f64 - drag_start_x.as_f64();
-                let delta_ms = (delta_x / px_per_second.as_f64() * 1000.0) as i32;
-                drag_offset_ms.set(delta_ms);
+                
+                if mode == DragTarget::Playhead {
+                    if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                        let rect = v.get_bounding_client_rect();
+                        let mouse_x = e.client_x() as f64;
+                        
+                        // Recalculate offset based on absolute cursor position to keep it centered
+                        let absolute_x = mouse_x - rect.left() + v.scroll_left() as f64;
+                        let target_time_ms = (absolute_x / px_per_second.as_f64() * 1000.0) as i32;
+                        let current_time_ms = state.current_time_ms.as_u32() as i32;
+                        drag_offset_ms.set(target_time_ms - current_time_ms);
+
+                        let safe_zone = 60.0;
+                        if mouse_x < rect.left() + safe_zone {
+                            let ratio = (rect.left() + safe_zone - mouse_x) / safe_zone;
+                            *pan_velocity.borrow_mut() = -10.0 * ratio.min(1.0);
+                        } else if mouse_x > rect.right() - safe_zone {
+                            let ratio = (mouse_x - (rect.right() - safe_zone)) / safe_zone;
+                            *pan_velocity.borrow_mut() = 10.0 * ratio.min(1.0);
+                        } else {
+                            *pan_velocity.borrow_mut() = 0.0;
+                        }
+                    }
+                } else {
+                    let delta_ms = (delta_x / px_per_second.as_f64() * 1000.0) as i32;
+                    drag_offset_ms.set(delta_ms);
+                }
             }
         })
     };
@@ -418,9 +516,11 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let drag_target_id = drag_target_id.clone();
         let state = props.state.clone();
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
+        let pan_velocity = pan_velocity.clone();
         
         Callback::from(move |_| {
             *is_scrollbar_dragged.borrow_mut() = false;
+            *pan_velocity.borrow_mut() = 0.0;
             
             if let Some(mode) = *drag_mode {
                 let offset = *drag_offset_ms;
@@ -436,6 +536,11 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             if let Some(id) = *drag_target_id {
                                 state.dispatch(AppAction::ShiftBoundary(id, false, offset));
                             }
+                        }
+                        DragTarget::Playhead => {
+                            let current_ms = state.current_time_ms.as_u32() as i32;
+                            let new_ms = (current_ms + offset).max(0) as u32;
+                            state.dispatch(AppAction::Seek(TimeMs(new_ms)));
                         }
                     }
                 }
@@ -508,6 +613,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     on_keydown={on_keydown}
                     on_mousemove={on_mousemove}
                     on_mousedown_content={on_timeline_mousedown}
+                    on_mousedown_ruler={on_ruler_mousedown}
                     on_import_audio={import_click}
                     on_chunk_drag_start={on_chunk_drag_start}
                 />
