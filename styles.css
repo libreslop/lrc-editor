@@ -406,10 +406,11 @@ svg {
   padding: 7px 10px;
   border: 1px solid rgba(255, 75, 85, 0.85);
   border-radius: var(--radius);
-  background: rgba(65, 21, 27, 0.96);
+  background: rgba(65, 21, 27, 0.8);
   color: #ffd7da;
   font-size: 12px;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+  z-index: 10;
 }
 
 .source-panel {
