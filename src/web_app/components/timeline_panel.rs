@@ -150,22 +150,11 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let current_time_ref = yew::use_mut_ref(|| props.state.current_time_ms);
         *current_time_ref.borrow_mut() = props.state.current_time_ms;
 
-        let bounds_ref = yew::use_mut_ref(|| (TimeMs(0), TimeMs(0)));
+        let bounds_ref = yew::use_mut_ref(|| TimeMs(0));
         *bounds_ref.borrow_mut() = {
             let audio_dur = props.state.duration_ms;
-            let last_nonempty = props.state.document.as_ref().and_then(|d| {
-                d.entries().iter().rev().find(|e| !e.is_empty()).map(|e| e.time_ms())
-            }).unwrap_or(TimeMs(0));
-            
             let last_lyric = props.state.document.as_ref().and_then(|d| d.last_entry_time_ms()).unwrap_or(TimeMs(0));
-            let timeline_dur = TimeMs(audio_dur.as_u32().max(last_lyric.as_u32()) + 10000);
-            
-            let base_max = if last_nonempty.as_u32() > audio_dur.as_u32() {
-                TimeMs(last_nonempty.as_u32() + 10000)
-            } else {
-                audio_dur
-            };
-            (base_max, timeline_dur)
+            TimeMs(audio_dur.as_u32().max(last_lyric.as_u32()) + 10000)
         };
 
         let last_seek_ref = yew::use_mut_ref(|| props.state.last_seek_request);
@@ -191,7 +180,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 let last_time = js_sys::Date::now();
                 let last_time_ref = std::rc::Rc::new(std::cell::Cell::new(last_time));
                 
-                let mut local_current = start_time;
+                let mut local_current_f64 = start_time.as_u32() as f64;
                 let mut last_handled_seek = *last_seek_ref.borrow();
                 
                 let interval = gloo_timers::callback::Interval::new(16, move || {
@@ -199,42 +188,44 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     let delta = now - last_time_ref.get();
                     last_time_ref.set(now);
                     
+                    local_current_f64 += delta;
+                    
                     let current_seek = *last_seek_ref.borrow();
                     if current_seek != last_handled_seek {
                         last_handled_seek = current_seek;
                         if let Some(seek_time) = current_seek {
-                            local_current = seek_time;
+                            local_current_f64 = seek_time.as_u32() as f64;
                         }
                     }
                     
-                    let mut synced = false;
                     if let Some(audio) = audio_ref.cast::<web_sys::HtmlAudioElement>() {
                         let audio_dur_ms = (audio.duration() * 1000.0) as u32;
-                        if local_current.as_u32() < audio_dur_ms && !audio.paused() && !audio.ended() {
-                            local_current = TimeMs((audio.current_time() * 1000.0) as u32);
-                            synced = true;
-                        } else if local_current.as_u32() < audio_dur_ms && audio.paused() {
-                            let _ = audio.play();
+                        
+                        // Sync to audio if we are playing and not yet at the very end.
+                        // We stop syncing 200ms before the end to avoid browser "stutter" 
+                        // as it approaches the finish line.
+                        if local_current_f64 + 200.0 < audio_dur_ms as f64 && !audio.paused() && !audio.ended() {
+                            let audio_time_ms = audio.current_time() * 1000.0;
+                            // Only sync if audio time is reasonable
+                            if audio_time_ms > 0.0 || local_current_f64 < 500.0 {
+                                local_current_f64 = audio_time_ms;
+                            }
+                        } else if local_current_f64 < audio_dur_ms as f64 && audio.paused() && !audio.ended() {
+                            // Try to keep audio playing if we're not at the runway yet
+                            if local_current_f64 + 100.0 < audio_dur_ms as f64 {
+                                let _ = audio.play();
+                            }
                         }
                     }
                     
-                    if !synced {
-                        local_current = TimeMs(local_current.as_u32() + delta as u32);
-                    }
+                    let max_dur = *bounds_ref.borrow();
+                    let current_time_ms = TimeMs(local_current_f64 as u32);
                     
-                    let (base_max, timeline_dur) = *bounds_ref.borrow();
-                    let max_dur = if start_time.as_u32() >= base_max.as_u32() {
-                        timeline_dur
-                    } else {
-                        base_max
-                    };
-                    
-                    if local_current.as_u32() >= max_dur.as_u32() {
-                        local_current = max_dur;
-                        state.dispatch(AppAction::SetTime(local_current));
+                    if current_time_ms.as_u32() >= max_dur.as_u32() {
+                        state.dispatch(AppAction::SetTime(max_dur));
                         state.dispatch(AppAction::TogglePlay);
                     } else {
-                        state.dispatch(AppAction::SetTime(local_current));
+                        state.dispatch(AppAction::SetTime(current_time_ms));
                     }
                 });
                 
