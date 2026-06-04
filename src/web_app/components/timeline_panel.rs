@@ -102,6 +102,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     let audio_dur_ms = (audio.duration() * 1000.0) as u32;
                     if start_time.as_u32() < audio_dur_ms {
                         let _ = audio.play();
+                    } else {
+                        // Ensure audio is paused if we are past duration
+                        let _ = audio.pause();
                     }
                 }
                 
@@ -130,6 +133,11 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         if local_current.as_u32() < audio_dur_ms && !audio.paused() && !audio.ended() {
                             local_current = TimeMs((audio.current_time() * 1000.0) as u32);
                             synced = true;
+                        } else if local_current.as_u32() < audio_dur_ms && audio.paused() {
+                            // If we are before audio end but it's paused (e.g. buffering or just started)
+                            // We should probably wait for it or just drift. 
+                            // For now, let's just drift to keep it simple, but try to play if possible.
+                            let _ = audio.play();
                         }
                     }
                     
@@ -290,12 +298,15 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     // Smooth playhead & auto pan
     {
         let playing = props.state.playing;
-        let audio_ref = audio_ref.clone();
         let playhead_ref = playhead_ref.clone();
         let viewport_ref = viewport_ref.clone();
         let timecode_ref = timecode_ref.clone();
         let px_per_second_val = px_per_second;
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
+        
+        // Keep a live reference to current_time_ms for the RAF loop
+        let current_time_ms_ref = use_mut_ref(|| props.state.current_time_ms);
+        *current_time_ms_ref.borrow_mut() = props.state.current_time_ms;
 
         use_effect_with(playing, move |playing| {
             use wasm_bindgen::closure::Closure;
@@ -305,21 +316,19 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let cb = Rc::new(RefCell::new(None::<Closure<dyn FnMut()>>));
             let cb_clone = cb.clone();
             
-            let audio = audio_ref.clone();
             let playhead = playhead_ref.clone();
             let viewport = viewport_ref.clone();
             let timecode = timecode_ref.clone();
 
             if *playing {
                 *cb_clone.borrow_mut() = Some(Closure::wrap(Box::new(move || {
-                    if let (Some(a), Some(p), Some(v)) = (
-                        audio.cast::<HtmlAudioElement>(),
+                    if let (Some(p), Some(v)) = (
                         playhead.cast::<web_sys::HtmlElement>(),
                         viewport.cast::<web_sys::HtmlElement>(),
                     ) {
                         let px = px_per_second_val.as_f64();
-                        let ct = a.current_time();
-                        let playhead_x = ct * px;
+                        let current_time_ms = *current_time_ms_ref.borrow();
+                        let playhead_x = current_time_ms.to_secs() * px;
                         let _ = p.set_attribute("style", &format!("transform: translateX({}px);", playhead_x));
 
                         let scroll_left = v.scroll_left() as f64;
@@ -331,10 +340,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         }
 
                         if let Some(tc) = timecode.cast::<web_sys::HtmlElement>() {
-                            let total_secs = ct as u32;
+                            let total_secs = current_time_ms.as_u32() / 1000;
                             let mins = total_secs / 60;
                             let secs = total_secs % 60;
-                            let ms = (ct * 1000.0) as u32 % 1000;
+                            let ms = current_time_ms.as_u32() % 1000;
                             tc.set_inner_text(&format!("{:02}:{:02}.{:03}", mins, secs, ms));
                         }
                     }
