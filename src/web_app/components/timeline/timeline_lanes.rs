@@ -31,11 +31,7 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
     let state = &props.state;
     let doc = state.document.as_ref();
 
-    let mut playhead_x = state.current_time_ms.to_secs() * props.px_per_second.as_f64();
-    if props.drag_mode == Some(DragTarget::Playhead) {
-        let offset_px = (props.drag_offset_ms as f64 / 1000.0) * props.px_per_second.as_f64();
-        playhead_x = (playhead_x + offset_px).max(0.0);
-    }
+    let playhead_x = state.current_time_ms.to_secs() * props.px_per_second.as_f64();
 
     html! {
         <div 

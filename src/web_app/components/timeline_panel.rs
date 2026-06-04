@@ -29,6 +29,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let drag_offset_ms = use_state(|| 0i32);
     let drag_target_id = use_state(|| None::<usize>);
     let is_scrollbar_dragged = use_mut_ref(|| false);
+    let last_mouse_pos = use_mut_ref(|| (0.0, 0.0));
 
     let on_file_change = {
         let audio_url = audio_url.clone();
@@ -63,27 +64,46 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     };
 
     let pan_velocity = use_mut_ref(|| 0.0);
-    // Pan loop for auto-panning during drag
+    
+    // Keep live references for the RAF loop to avoid stale closures
+    let current_time_ms_ref = use_mut_ref(|| props.state.current_time_ms);
+    *current_time_ms_ref.borrow_mut() = props.state.current_time_ms;
+
+    // Drag & Pan loop
     {
         let pan_velocity = pan_velocity.clone();
         let viewport_ref = viewport_ref.clone();
-        let drag_offset_ms = drag_offset_ms.clone();
         let px_per_second = px_per_second;
         let drag_mode = drag_mode.clone();
+        let state = props.state.clone();
+        let drag_offset_ms = drag_offset_ms.clone();
+        let last_mouse_pos = last_mouse_pos.clone();
+        let current_time_ms_ref = current_time_ms_ref.clone();
 
         use_effect(move || {
             let interval = gloo_timers::callback::Interval::new(16, move || {
                 let vel = *pan_velocity.borrow();
-                if vel != 0.0 && (*drag_mode).is_some() {
-                    if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                        let old_scroll = v.scroll_left();
+                let mode = *drag_mode;
+                
+                if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                    let old_scroll = v.scroll_left();
+                    if vel != 0.0 && mode.is_some() {
                         v.set_scroll_left(old_scroll + vel as i32);
-                        let actual_delta = v.scroll_left() - old_scroll;
+                    }
+                    let actual_delta = v.scroll_left() - old_scroll;
+                    
+                    if mode == Some(DragTarget::Playhead) {
+                        let rect = v.get_bounding_client_rect();
+                        let (mouse_x, _) = *last_mouse_pos.borrow();
+                        let absolute_x = mouse_x - rect.left() + v.scroll_left() as f64;
+                        let target_time_ms = (absolute_x / px_per_second.as_f64() * 1000.0) as i32;
+                        let new_time = TimeMs(target_time_ms.max(0) as u32);
                         
-                        if actual_delta != 0 {
-                            let delta_ms = (actual_delta as f64 / px_per_second.as_f64() * 1000.0) as i32;
-                            drag_offset_ms.set(*drag_offset_ms + delta_ms);
-                        }
+                        *current_time_ms_ref.borrow_mut() = new_time;
+                        state.dispatch(AppAction::SetTime(new_time));
+                    } else if mode.is_some() && actual_delta != 0 {
+                        let delta_ms = (actual_delta as f64 / px_per_second.as_f64() * 1000.0) as i32;
+                        drag_offset_ms.set(*drag_offset_ms + delta_ms);
                     }
                 }
             });
@@ -349,19 +369,19 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     // Smooth playhead & auto pan
     {
         let playing = props.state.playing;
+        let dragging_playhead = *drag_mode == Some(DragTarget::Playhead);
         let playhead_ref = playhead_ref.clone();
         let viewport_ref = viewport_ref.clone();
         let timecode_ref = timecode_ref.clone();
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
         
-        // Keep live references for the RAF loop to avoid stale closures
-        let current_time_ms_ref = use_mut_ref(|| props.state.current_time_ms);
-        *current_time_ms_ref.borrow_mut() = props.state.current_time_ms;
+        // Use the live reference for the RAF loop
+        let current_time_ms_ref = current_time_ms_ref.clone();
         
         let px_per_second_ref = use_mut_ref(|| px_per_second);
         *px_per_second_ref.borrow_mut() = px_per_second;
 
-        use_effect_with(playing, move |playing| {
+        use_effect_with((playing, dragging_playhead), move |(playing, dragging_playhead)| {
             use wasm_bindgen::closure::Closure;
             use std::rc::Rc;
             use std::cell::RefCell;
@@ -373,7 +393,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let viewport = viewport_ref.clone();
             let timecode = timecode_ref.clone();
 
-            if *playing {
+            if *playing || *dragging_playhead {
                 *cb_clone.borrow_mut() = Some(Closure::wrap(Box::new(move || {
                     if let (Some(p), Some(v)) = (
                         playhead.cast::<web_sys::HtmlElement>(),
@@ -430,23 +450,23 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let on_ruler_mousedown = {
         let drag_mode = drag_mode.clone();
         let drag_start_x = drag_start_x.clone();
-        let drag_offset_ms = drag_offset_ms.clone();
         let state = props.state.clone();
         let viewport_ref = viewport_ref.clone();
         let px_per_second = px_per_second;
+        let last_mouse_pos = last_mouse_pos.clone();
         
         Callback::from(move |e: MouseEvent| {
             e.stop_propagation();
             drag_mode.set(Some(DragTarget::Playhead));
             drag_start_x.set(Pixels(e.client_x() as f64));
+            *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
             
             // Make playhead jump to cursor immediately
             if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let rect = viewport.get_bounding_client_rect();
                 let x = e.client_x() as f64 - rect.left() + viewport.scroll_left() as f64;
                 let target_time_ms = (x / px_per_second.as_f64() * 1000.0) as i32;
-                let current_time_ms = state.current_time_ms.as_u32() as i32;
-                drag_offset_ms.set(target_time_ms - current_time_ms);
+                state.dispatch(AppAction::SetTime(TimeMs(target_time_ms.max(0) as u32)));
             }
         })
     };
@@ -466,10 +486,12 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let drag_offset_ms = drag_offset_ms.clone();
         let viewport_ref = viewport_ref.clone();
         let pan_velocity = pan_velocity.clone();
-        let state = props.state.clone();
         let px_per_second = px_per_second;
+        let last_mouse_pos = last_mouse_pos.clone();
 
         Callback::from(move |e: MouseEvent| {
+            *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
+            
             if let Some(mode) = *drag_mode {
                 let delta_x = e.client_x() as f64 - drag_start_x.as_f64();
                 
@@ -478,12 +500,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         let rect = v.get_bounding_client_rect();
                         let mouse_x = e.client_x() as f64;
                         
-                        // Recalculate offset based on absolute cursor position to keep it centered
-                        let absolute_x = mouse_x - rect.left() + v.scroll_left() as f64;
-                        let target_time_ms = (absolute_x / px_per_second.as_f64() * 1000.0) as i32;
-                        let current_time_ms = state.current_time_ms.as_u32() as i32;
-                        drag_offset_ms.set(target_time_ms - current_time_ms);
-
                         let safe_zone = 60.0;
                         if mouse_x < rect.left() + safe_zone {
                             let ratio = (rect.left() + safe_zone - mouse_x) / safe_zone;
@@ -523,25 +539,31 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             *pan_velocity.borrow_mut() = 0.0;
             
             if let Some(mode) = *drag_mode {
-                let offset = *drag_offset_ms;
-                if offset != 0 {
-                    match mode {
-                        DragTarget::Body => state.dispatch(AppAction::ShiftSelected(offset)),
-                        DragTarget::LeftEdge => {
+                match mode {
+                    DragTarget::Body => {
+                        let offset = *drag_offset_ms;
+                        if offset != 0 {
+                            state.dispatch(AppAction::ShiftSelected(offset));
+                        }
+                    }
+                    DragTarget::LeftEdge => {
+                        let offset = *drag_offset_ms;
+                        if offset != 0 {
                             if let Some(id) = *drag_target_id {
                                 state.dispatch(AppAction::ShiftBoundary(id, true, offset));
                             }
                         }
-                        DragTarget::RightEdge => {
+                    }
+                    DragTarget::RightEdge => {
+                        let offset = *drag_offset_ms;
+                        if offset != 0 {
                             if let Some(id) = *drag_target_id {
                                 state.dispatch(AppAction::ShiftBoundary(id, false, offset));
                             }
                         }
-                        DragTarget::Playhead => {
-                            let current_ms = state.current_time_ms.as_u32() as i32;
-                            let new_ms = (current_ms + offset).max(0) as u32;
-                            state.dispatch(AppAction::Seek(TimeMs(new_ms)));
-                        }
+                    }
+                    DragTarget::Playhead => {
+                        state.dispatch(AppAction::Seek(state.current_time_ms));
                     }
                 }
                 drag_mode.set(None);
