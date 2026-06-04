@@ -65,69 +65,65 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                 <div class="track-lane lyrics-lane">
                     {
                         if let Some(doc) = doc {
-                            let chunks: Vec<_> = doc.timeline_chunks(props.duration_ms).into_iter().filter(|c| !c.is_empty()).collect();
-                            let mut chunk_html = Vec::new();
-                            
-                            for (index, chunk) in chunks.iter().enumerate() {
-                                let mut start_px = Pixels(chunk.start_ms().to_secs() * props.px_per_second.as_f64());
-                                let mut end_px = Pixels(chunk.end_ms().to_secs() * props.px_per_second.as_f64());
-                                
-                                let is_selected = state.selection.contains(chunk.entry_id());
-                                
-                                if let Some(mode) = props.drag_mode {
-                                    let offset_px = (props.drag_offset_ms as f64 / 1000.0) * props.px_per_second.as_f64();
-                                    match mode {
-                                        DragTarget::Body => {
-                                            if is_selected {
-                                                start_px = Pixels(start_px.as_f64() + offset_px);
-                                                end_px = Pixels(end_px.as_f64() + offset_px);
-                                            }
-                                        }
-                                        DragTarget::LeftEdge => {
-                                            if let Some(id) = props.drag_target_id {
-                                                if id == chunk.entry_id() {
-                                                    start_px = Pixels(start_px.as_f64() + offset_px);
-                                                }
-                                            }
-                                        }
-                                        DragTarget::RightEdge => {
-                                            if let Some(id) = props.drag_target_id {
-                                                if id == chunk.entry_id() {
-                                                    end_px = Pixels(end_px.as_f64() + offset_px);
-                                                }
-                                            }
-                                        }
-                                        DragTarget::Boundary => {
-                                            if let Some(id) = props.drag_target_id {
-                                                if id == chunk.entry_id() {
-                                                    // Boundary after this chunk
-                                                    end_px = Pixels(end_px.as_f64() + offset_px);
-                                                } else if doc.previous_entry_id(chunk.entry_id()) == Some(id) {
-                                                    // This chunk is after the boundary
-                                                    start_px = Pixels(start_px.as_f64() + offset_px);
-                                                }
-                                            }
-                                        }
-                                        DragTarget::Playhead | DragTarget::Selection => {}
+                            let chunks: Vec<crate::web_app::editor::timeline::Interval> = if let Some(mode) = props.drag_mode {
+                                match mode {
+                                    DragTarget::Body | DragTarget::LeftEdge | DragTarget::RightEdge | DragTarget::Boundary => {
+                                        crate::web_app::editor::timeline::preview_intervals(
+                                            doc,
+                                            props.duration_ms,
+                                            props.state.selection.selected_ids(),
+                                            mode,
+                                            props.drag_target_id,
+                                            props.drag_offset_ms
+                                        )
                                     }
+                                    _ => doc.timeline_chunks(props.duration_ms).into_iter().map(|c| crate::web_app::editor::timeline::Interval {
+                                        entry_id: c.entry_id(),
+                                        uid: c.uid(),
+                                        color_index: c.color_index(),
+                                        start: c.start_ms(),
+                                        end: c.end_ms(),
+                                        raw_text: c.raw_text().to_owned(),
+                                        is_empty: c.is_empty(),
+                                    }).collect()
                                 }
+                            } else {
+                                doc.timeline_chunks(props.duration_ms).into_iter().map(|c| crate::web_app::editor::timeline::Interval {
+                                    entry_id: c.entry_id(),
+                                    uid: c.uid(),
+                                    color_index: c.color_index(),
+                                    start: c.start_ms(),
+                                    end: c.end_ms(),
+                                    raw_text: c.raw_text().to_owned(),
+                                    is_empty: c.is_empty(),
+                                }).collect()
+                            };
 
+                            let mut chunk_html = Vec::new();
+                            let visible_chunks: Vec<_> = chunks.into_iter().filter(|c| !c.is_empty).collect();
+                            
+                            for (index, chunk) in visible_chunks.iter().enumerate() {
+                                let start_px = Pixels(chunk.start.to_secs() * props.px_per_second.as_f64());
+                                let end_px = Pixels(chunk.end.to_secs() * props.px_per_second.as_f64());
+                                
+                                let is_selected = state.selection.contains(chunk.uid);
                                 let width = Pixels((end_px.as_f64() - start_px.as_f64()).max(1.0));
-                                let chunk_id = chunk.entry_id();
+                                let chunk_uid = chunk.uid;
                                 let on_drag_start = {
                                     let on_chunk_drag_start = props.on_chunk_drag_start.clone();
                                     Callback::from(move |(e, target)| {
-                                        on_chunk_drag_start.emit((chunk_id, e, target));
+                                        on_chunk_drag_start.emit((chunk_uid, e, target));
                                     })
                                 };
 
                                 chunk_html.push(html! {
                                     <LyricChunk 
-                                        key={chunk.entry_id()}
+                                        key={chunk.uid}
                                         state={props.state.clone()}
-                                        entry_id={chunk.entry_id()}
-                                        text={chunk.text().to_owned()}
-                                        is_empty={chunk.is_empty()}
+                                        entry_id={chunk.uid}
+                                        color_index={chunk.color_index}
+                                        text={chunk.raw_text.to_owned()}
+                                        is_empty={chunk.is_empty}
                                         start_px={start_px}
                                         width={width}
                                         is_selected={is_selected}
@@ -136,8 +132,8 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                                 });
 
                                 // Render boundary handle between this and next if adjacent
-                                if let Some(next) = chunks.get(index + 1) {
-                                    if !next.is_empty() && next.start_ms() == chunk.end_ms() {
+                                if let Some(next) = visible_chunks.get(index + 1) {
+                                    if !next.is_empty && next.start == chunk.end {
                                         let b_pos = end_px;
                                         let on_b_mousedown = {
                                             let on_drag_start = on_drag_start.clone();

@@ -491,33 +491,39 @@ svg {
   position: absolute;
   top: 13px;
   height: 54px;
-  min-width: 18px;
+  min-width: 4px;
   overflow: hidden;
-  padding: 7px 10px 0;
+  padding: 7px 4px 0;
   border: 1px solid rgba(119, 62, 66, 0.78);
   border-radius: var(--radius);
   background: var(--coral);
   color: #fff7f7;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 720;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
   box-shadow: inset 0 -18px 0 rgba(0, 0, 0, 0.08);
+  text-align: center;
 }
 
-.lyric-chunk:nth-child(4n + 1) {
+.lyric-chunk.color-0 {
+  background: var(--coral);
+  border-color: rgba(119, 62, 66, 0.78);
+}
+
+.lyric-chunk.color-1 {
   background: #df8d4d;
   border-color: rgba(116, 70, 31, 0.78);
 }
 
-.lyric-chunk:nth-child(4n + 2) {
+.lyric-chunk.color-2 {
   background: #62b85f;
   border-color: rgba(46, 93, 44, 0.8);
 }
 
-.lyric-chunk:nth-child(4n + 3) {
+.lyric-chunk.color-3 {
   background: #41b59f;
   border-color: rgba(32, 91, 81, 0.8);
 }

@@ -5,6 +5,8 @@ use crate::domain::parser::SourceLine;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LyricEntry {
     pub(crate) id: usize,
+    pub(crate) uid: usize,
+    pub(crate) color_index: u8,
     pub(crate) time: TimeMs,
     pub(crate) timestamp: String,
     pub(crate) text: String,
@@ -19,6 +21,16 @@ impl LyricEntry {
     /// Stable id in timestamp-sorted order.
     pub fn id(&self) -> usize {
         self.id
+    }
+
+    /// Stable unique id across re-parses.
+    pub fn uid(&self) -> usize {
+        self.uid
+    }
+
+    /// Color index (0-3) for visual distinction.
+    pub fn color_index(&self) -> u8 {
+        self.color_index
     }
 
     /// Timestamp in milliseconds.
@@ -61,6 +73,8 @@ impl LyricEntry {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TimelineChunk {
     pub(crate) entry_id: usize,
+    pub(crate) uid: usize,
+    pub(crate) color_index: u8,
     pub(crate) start_ms: TimeMs,
     pub(crate) end_ms: TimeMs,
     pub(crate) text: String,
@@ -72,6 +86,16 @@ impl TimelineChunk {
     /// Entry id represented by this chunk.
     pub fn entry_id(&self) -> usize {
         self.entry_id
+    }
+
+    /// Stable unique id.
+    pub fn uid(&self) -> usize {
+        self.uid
+    }
+
+    /// Color index.
+    pub fn color_index(&self) -> u8 {
+        self.color_index
     }
 
     /// Chunk start timestamp.

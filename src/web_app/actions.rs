@@ -33,6 +33,7 @@ pub struct AppState {
     pub history: Vec<String>,
     pub history_index: usize,
     pub zoom_level: f64,
+    pub next_uid: usize,
 }
 
 impl Clone for AppState {
@@ -49,6 +50,7 @@ impl Clone for AppState {
             history: self.history.clone(),
             history_index: self.history_index,
             zoom_level: self.zoom_level,
+            next_uid: self.next_uid,
         }
     }
 }
@@ -60,6 +62,26 @@ impl AppState {
             .unwrap_or(TimeMs(0));
         TimeMs(self.duration_ms.as_u32().max(last_lyric_ms.as_u32()) + 10000)
     }
+
+    pub fn update_document(&mut self, source: String) {
+        self.source_text = source.clone();
+        let parser = LrcParser::new(&source);
+        match parser.parse() {
+            Ok(mut doc) => {
+                crate::domain::document::reconcile_identity(
+                    self.document.as_ref(),
+                    &mut doc,
+                    &mut self.next_uid,
+                );
+                self.selection.prune(&doc);
+                self.document = Some(doc);
+                self.parse_error = None;
+            }
+            Err(e) => {
+                self.parse_error = Some(e.prefixed_message());
+            }
+        }
+    }
 }
 
 impl Reducible for AppState {
@@ -69,18 +91,7 @@ impl Reducible for AppState {
         let mut new_state = (*self).clone();
         match action {
             AppAction::UpdateSource(source) => {
-                new_state.source_text = source.clone();
-                let parser = LrcParser::new(&source);
-                match parser.parse() {
-                    Ok(doc) => {
-                        new_state.selection.prune(&doc);
-                        new_state.document = Some(doc);
-                        new_state.parse_error = None;
-                    }
-                    Err(e) => {
-                        new_state.parse_error = Some(e.prefixed_message());
-                    }
-                }
+                new_state.update_document(source);
             }
             AppAction::SelectEntry(id, mode) => {
                 if let Some(doc) = &new_state.document {
@@ -127,24 +138,14 @@ impl Reducible for AppState {
                 if new_state.history_index > 0 {
                     new_state.history_index -= 1;
                     let source = new_state.history[new_state.history_index].clone();
-                    new_state.source_text = source.clone();
-                    if let Ok(doc) = LrcParser::new(&source).parse() {
-                        new_state.selection.prune(&doc);
-                        new_state.document = Some(doc);
-                        new_state.parse_error = None;
-                    }
+                    new_state.update_document(source);
                 }
             }
             AppAction::Redo => {
                 if new_state.history_index + 1 < new_state.history.len() {
                     new_state.history_index += 1;
                     let source = new_state.history[new_state.history_index].clone();
-                    new_state.source_text = source.clone();
-                    if let Ok(doc) = LrcParser::new(&source).parse() {
-                        new_state.selection.prune(&doc);
-                        new_state.document = Some(doc);
-                        new_state.parse_error = None;
-                    }
+                    new_state.update_document(source);
                 }
             }
             AppAction::SetZoom(zoom) => {
@@ -158,20 +159,42 @@ impl Reducible for AppState {
             AppAction::DeleteSelected => {
                 if !new_state.selection.selected_ids().is_empty() {
                     if let Some(doc) = &new_state.document {
-                        let mut text = new_state.source_text.clone();
-                        for id in new_state.selection.selected_ids().iter() {
-                            if let Some(entry) = doc.entries().iter().find(|e| e.id() == *id) {
-                                let tag = format!("[{}]", entry.timestamp());
-                                text = text.replacen(&tag, "", 1);
+                        let selected_uids = new_state.selection.selected_ids().to_vec();
+                        let mut entries = doc.entries().to_vec();
+                        
+                        for entry in entries.iter_mut() {
+                            if selected_uids.contains(&entry.uid()) {
+                                entry.text = String::new();
+                                entry.display_text = String::new();
                             }
                         }
                         
-                        new_state.source_text = text.clone();
-                        if let Ok(new_doc) = LrcParser::new(&text).parse() {
-                            new_state.selection.prune(&new_doc);
-                            new_state.document = Some(new_doc);
-                            new_state.parse_error = None;
+                        let mut merged_entries: Vec<crate::domain::LyricEntry> = Vec::new();
+                        for entry in entries {
+                            if let Some(last) = merged_entries.last() {
+                                if last.is_empty() && entry.is_empty() {
+                                    continue;
+                                }
+                            }
+                            merged_entries.push(entry);
                         }
+                        let entries = merged_entries;
+                        
+                        let mut next_uid = new_state.next_uid;
+                        let mut new_doc = LrcDocument::new(entries, doc.metadata().to_vec(), doc.line_count());
+                        crate::domain::document::reconcile_identity(
+                            Some(doc),
+                            &mut new_doc,
+                            &mut next_uid,
+                        );
+                        
+                        let text = new_doc.to_source_text();
+                        new_state.next_uid = next_uid;
+                        new_state.source_text = text.clone();
+                        new_state.selection.prune(&new_doc);
+                        new_state.document = Some(new_doc);
+                        new_state.parse_error = None;
+                        
                         new_state.history.truncate(new_state.history_index + 1);
                         new_state.history.push(text);
                         new_state.history_index = new_state.history.len() - 1;
@@ -189,12 +212,7 @@ impl Reducible for AppState {
                             timeline_duration_ms
                         );
                         
-                        new_state.source_text = text.clone();
-                        if let Ok(new_doc) = LrcParser::new(&text).parse() {
-                            new_state.selection.prune(&new_doc);
-                            new_state.document = Some(new_doc);
-                            new_state.parse_error = None;
-                        }
+                        new_state.update_document(text.clone());
                         new_state.history.truncate(new_state.history_index + 1);
                         new_state.history.push(text);
                         new_state.history_index = new_state.history.len() - 1;
@@ -214,12 +232,7 @@ impl Reducible for AppState {
                             timeline_duration_ms
                         );
                         
-                        new_state.source_text = text.clone();
-                        if let Ok(new_doc) = LrcParser::new(&text).parse() {
-                            new_state.selection.prune(&new_doc);
-                            new_state.document = Some(new_doc);
-                            new_state.parse_error = None;
-                        }
+                        new_state.update_document(text.clone());
                         new_state.history.truncate(new_state.history_index + 1);
                         new_state.history.push(text);
                         new_state.history_index = new_state.history.len() - 1;
@@ -248,6 +261,7 @@ mod tests {
             history: vec![String::new()],
             history_index: 0,
             zoom_level: 0.25,
+            next_uid: 1,
         })
     }
 

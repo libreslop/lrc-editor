@@ -1,88 +1,86 @@
 use crate::domain::{LrcDocument, TimeMs};
+use crate::web_app::components::timeline::DragTarget;
 
 #[derive(Clone, Debug)]
 pub struct Interval {
+    pub entry_id: usize,
+    pub uid: usize,
+    pub color_index: u8,
     pub start: TimeMs,
     pub end: TimeMs,
     pub raw_text: String,
     pub is_empty: bool,
 }
 
-pub fn shift_selected(doc: &LrcDocument, selected_ids: &[usize], delta_ms: i32, duration_ms: TimeMs) -> String {
+pub fn preview_intervals(
+    doc: &LrcDocument,
+    duration_ms: TimeMs,
+    selected_uids: &[usize],
+    drag_mode: DragTarget,
+    drag_target_uid: Option<usize>,
+    drag_offset_ms: i32,
+) -> Vec<Interval> {
     let chunks = doc.timeline_chunks(duration_ms);
-    
     let mut moved = Vec::new();
     let mut statics = Vec::new();
-    
-    for c in chunks {
-        let mut i = Interval {
-            start: c.start_ms(),
-            end: c.end_ms(),
-            raw_text: c.raw_text().to_string(),
-            is_empty: c.is_empty(),
-        };
-        
-        if selected_ids.contains(&c.entry_id()) {
-            i.start = TimeMs((i.start.as_u32() as i32 + delta_ms).max(0) as u32);
-            i.end = TimeMs((i.end.as_u32() as i32 + delta_ms).max(0) as u32);
-            moved.push(i);
-        } else {
-            statics.push(i);
-        }
-    }
-    
-    let final_intervals = resolve_overlaps(statics, moved);
-    build_lrc(doc, final_intervals)
-}
 
-pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, both: bool, delta_ms: i32, duration_ms: TimeMs) -> String {
-    let chunks = doc.timeline_chunks(duration_ms);
-    
-    let mut moved = Vec::new();
-    let mut statics = Vec::new();
-    
-    // Determine which chunks are "moved" (in terms of boundary change)
-    let mut moved_ids = vec![chunk_id];
-    if both {
-        if left_edge {
-            if let Some(prev_id) = doc.previous_entry_id(chunk_id) {
-                moved_ids.push(prev_id);
-            }
-        } else {
-            if let Some(next_id) = doc.next_entry_id(chunk_id) {
-                moved_ids.push(next_id);
+    let mut moved_uids = Vec::new();
+    match drag_mode {
+        DragTarget::Body => moved_uids.extend_from_slice(selected_uids),
+        DragTarget::LeftEdge | DragTarget::RightEdge => {
+            if let Some(uid) = drag_target_uid {
+                moved_uids.push(uid);
             }
         }
+        DragTarget::Boundary => {
+            if let Some(uid) = drag_target_uid {
+                moved_uids.push(uid);
+                if let Some(next_uid) = doc.next_entry_uid(uid) {
+                    moved_uids.push(next_uid);
+                }
+            }
+        }
+        _ => {}
     }
-    
+
     for c in chunks {
         let mut i = Interval {
+            entry_id: c.entry_id(),
+            uid: c.uid(),
+            color_index: c.color_index(),
             start: c.start_ms(),
             end: c.end_ms(),
             raw_text: c.raw_text().to_string(),
             is_empty: c.is_empty(),
         };
-        
-        if moved_ids.contains(&c.entry_id()) {
-            if c.entry_id() == chunk_id {
-                if left_edge {
-                    i.start = TimeMs((i.start.as_u32() as i32 + delta_ms).max(0) as u32);
-                } else {
-                    i.end = TimeMs((i.end.as_u32() as i32 + delta_ms).max(0) as u32);
+
+        if moved_uids.contains(&c.uid()) {
+            match drag_mode {
+                DragTarget::Body => {
+                    i.start = TimeMs((i.start.as_u32() as i32 + drag_offset_ms).max(0) as u32);
+                    i.end = TimeMs((i.end.as_u32() as i32 + drag_offset_ms).max(0) as u32);
                 }
-            } else {
-                // The other chunk in a "both" move
-                if left_edge {
-                    // moving start of chunk_id. This is the end of the previous chunk.
-                    i.end = TimeMs((i.end.as_u32() as i32 + delta_ms).max(0) as u32);
-                } else {
-                    // moving end of chunk_id. This is the start of the next chunk.
-                    i.start = TimeMs((i.start.as_u32() as i32 + delta_ms).max(0) as u32);
+                DragTarget::LeftEdge => {
+                    if Some(c.uid()) == drag_target_uid {
+                        i.start = TimeMs((i.start.as_u32() as i32 + drag_offset_ms).max(0) as u32);
+                    }
                 }
+                DragTarget::RightEdge => {
+                    if Some(c.uid()) == drag_target_uid {
+                        i.end = TimeMs((i.end.as_u32() as i32 + drag_offset_ms).max(0) as u32);
+                    }
+                }
+                DragTarget::Boundary => {
+                    if Some(c.uid()) == drag_target_uid {
+                        // Dragging end of this chunk
+                        i.end = TimeMs((i.end.as_u32() as i32 + drag_offset_ms).max(0) as u32);
+                    } else {
+                        // Dragging start of the next chunk
+                        i.start = TimeMs((i.start.as_u32() as i32 + drag_offset_ms).max(0) as u32);
+                    }
+                }
+                _ => {}
             }
-            // Only push if still valid (start < end)
-            // But wait, if it's collapsed, we might still want to keep it as a "mover" that deletes others?
-            // Actually, if it's collapsed, it shouldn't exist anymore.
             if i.end > i.start {
                 moved.push(i);
             }
@@ -90,12 +88,29 @@ pub fn shift_boundary(doc: &LrcDocument, chunk_id: usize, left_edge: bool, both:
             statics.push(i);
         }
     }
-    
-    let final_intervals = resolve_overlaps(statics, moved);
-    build_lrc(doc, final_intervals)
+
+    resolve_overlaps(statics, moved)
 }
 
-fn resolve_overlaps(statics: Vec<Interval>, moved: Vec<Interval>) -> Vec<Interval> {
+pub fn shift_selected(doc: &LrcDocument, selected_uids: &[usize], delta_ms: i32, duration_ms: TimeMs) -> String {
+    let intervals = preview_intervals(doc, duration_ms, selected_uids, DragTarget::Body, None, delta_ms);
+    build_lrc(doc, intervals)
+}
+
+pub fn shift_boundary(doc: &LrcDocument, chunk_uid: usize, left_edge: bool, both: bool, delta_ms: i32, duration_ms: TimeMs) -> String {
+    let mode = if both {
+        DragTarget::Boundary
+    } else if left_edge {
+        DragTarget::LeftEdge
+    } else {
+        DragTarget::RightEdge
+    };
+    
+    let intervals = preview_intervals(doc, duration_ms, &[], mode, Some(chunk_uid), delta_ms);
+    build_lrc(doc, intervals)
+}
+
+pub fn resolve_overlaps(statics: Vec<Interval>, moved: Vec<Interval>) -> Vec<Interval> {
     let mut next_static = Vec::new();
     for st in statics {
         let mut fragments = vec![st];
@@ -144,6 +159,9 @@ fn build_lrc(doc: &LrcDocument, final_intervals: Vec<Interval>) -> String {
     for i in final_intervals {
         if i.start > current_time {
             resolved.push(Interval {
+                entry_id: 0,
+                uid: 0,
+                color_index: 0,
                 start: current_time,
                 end: i.start,
                 raw_text: String::new(),

@@ -1,4 +1,5 @@
 use yew::prelude::*;
+use wasm_bindgen::JsCast;
 use crate::domain::{Pixels, SelectionMode};
 use crate::web_app::actions::{AppState, AppAction};
 use super::DragTarget;
@@ -7,6 +8,7 @@ use super::DragTarget;
 pub struct LyricChunkProps {
     pub state: UseReducerHandle<AppState>,
     pub entry_id: usize,
+    pub color_index: u8,
     pub text: String,
     pub is_empty: bool,
     pub start_px: Pixels,
@@ -20,6 +22,7 @@ pub fn lyric_chunk(props: &LyricChunkProps) -> Html {
     let mut classes = classes!("lyric-chunk");
     if props.is_selected { classes.push("selected"); }
     if props.is_empty { classes.push("empty-gap"); }
+    classes.push(format!("color-{}", props.color_index));
 
     let onmousedown_body = {
         let entry_id = props.entry_id;
@@ -28,6 +31,15 @@ pub fn lyric_chunk(props: &LyricChunkProps) -> Html {
         let on_drag_start = props.on_drag_start.clone();
         Callback::from(move |e: MouseEvent| {
             e.stop_propagation();
+            
+            // Focus the timeline viewport so keyboard events are captured
+            if let Some(target) = e.target_dyn_into::<web_sys::Element>() {
+                if let Some(viewport) = target.closest(".timeline-viewport").ok().flatten() {
+                    if let Some(html_el) = viewport.dyn_into::<web_sys::HtmlElement>().ok() {
+                        let _ = html_el.focus();
+                    }
+                }
+            }
             
             let mut mode = SelectionMode::Replace;
             let mut should_select = !is_selected;
@@ -53,6 +65,13 @@ pub fn lyric_chunk(props: &LyricChunkProps) -> Html {
         let on_drag_start = props.on_drag_start.clone();
         Callback::from(move |e: MouseEvent| {
             e.stop_propagation();
+            if let Some(target) = e.target_dyn_into::<web_sys::Element>() {
+                if let Some(viewport) = target.closest(".timeline-viewport").ok().flatten() {
+                    if let Some(html_el) = viewport.dyn_into::<web_sys::HtmlElement>().ok() {
+                        let _ = html_el.focus();
+                    }
+                }
+            }
             state.dispatch(AppAction::ClearSelection);
             on_drag_start.emit((e, DragTarget::LeftEdge));
         })
@@ -63,6 +82,13 @@ pub fn lyric_chunk(props: &LyricChunkProps) -> Html {
         let on_drag_start = props.on_drag_start.clone();
         Callback::from(move |e: MouseEvent| {
             e.stop_propagation();
+            if let Some(target) = e.target_dyn_into::<web_sys::Element>() {
+                if let Some(viewport) = target.closest(".timeline-viewport").ok().flatten() {
+                    if let Some(html_el) = viewport.dyn_into::<web_sys::HtmlElement>().ok() {
+                        let _ = html_el.focus();
+                    }
+                }
+            }
             state.dispatch(AppAction::ClearSelection);
             on_drag_start.emit((e, DragTarget::RightEdge));
         })

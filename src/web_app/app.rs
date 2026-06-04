@@ -20,6 +20,7 @@ pub fn app() -> Html {
         history: vec![String::new()],
         history_index: 0,
         zoom_level: 0.25,
+        next_uid: 1,
     });
 
     {

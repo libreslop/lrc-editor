@@ -10,6 +10,8 @@ pub enum SelectionMode {
     Toggle,
     /// Expand from the anchor to the clicked chunk.
     Range,
+    /// Add the clicked chunk to the selection.
+    Add,
 }
 
 /// Selected lyric chunk ids and range anchor.
@@ -38,11 +40,11 @@ impl SelectionState {
     /// Keep only selections that still exist in the document.
     pub fn prune(&mut self, document: &LrcDocument) {
         self.selected_ids
-            .retain(|id| document.entry_by_id(*id).is_some());
+            .retain(|id| document.entry_by_uid(*id).is_some());
 
         if self
             .anchor_id
-            .is_some_and(|id| document.entry_by_id(id).is_none())
+            .is_some_and(|id| document.entry_by_uid(id).is_none())
         {
             self.anchor_id = None;
         }
@@ -57,8 +59,8 @@ impl SelectionState {
         self.selected_ids.clear();
 
         if let Some(entry) = entry.filter(|entry| !entry.is_empty()) {
-            self.selected_ids.push(entry.id());
-            self.anchor_id = Some(entry.id());
+            self.selected_ids.push(entry.uid());
+            self.anchor_id = Some(entry.uid());
         }
     }
 
@@ -68,14 +70,14 @@ impl SelectionState {
             .entries()
             .iter()
             .filter(|entry| !entry.is_empty())
-            .map(LyricEntry::id)
+            .map(LyricEntry::uid)
             .collect();
         self.anchor_id = self.selected_ids.first().copied();
     }
 
     /// Apply a click selection transition.
     pub fn select_entry(&mut self, document: &LrcDocument, entry_id: usize, mode: SelectionMode) {
-        let Some(entry) = document.entry_by_id(entry_id) else {
+        let Some(entry) = document.entry_by_uid(entry_id) else {
             return;
         };
 
@@ -98,16 +100,27 @@ impl SelectionState {
             }
             SelectionMode::Range => {
                 let anchor_id = self.anchor_id.unwrap_or(entry_id);
-                let start = anchor_id.min(entry_id);
-                let end = anchor_id.max(entry_id);
-                self.selected_ids = document
-                    .entries()
-                    .iter()
-                    .filter(|entry| {
-                        !entry.is_empty() && (start..=end).contains(&entry.id())
-                    })
-                    .map(LyricEntry::id)
-                    .collect();
+                // Need to find indices to do range correctly
+                let entries = document.entries();
+                let anchor_idx = entries.iter().position(|e| e.uid() == anchor_id);
+                let target_idx = entries.iter().position(|e| e.uid() == entry_id);
+                
+                if let (Some(a), Some(t)) = (anchor_idx, target_idx) {
+                    let start = a.min(t);
+                    let end = a.max(t);
+                    self.selected_ids = entries[start..=end]
+                        .iter()
+                        .filter(|e| !e.is_empty())
+                        .map(|e| e.uid())
+                        .collect();
+                }
+            }
+            SelectionMode::Add => {
+                if !self.selected_ids.contains(&entry_id) && !entry.is_empty() {
+                    self.selected_ids.push(entry_id);
+                    self.selected_ids.sort_unstable();
+                }
+                self.anchor_id = Some(entry_id);
             }
         }
     }

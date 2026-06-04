@@ -145,6 +145,8 @@ impl<'source> LrcParser<'source> {
                 .enumerate()
                 .map(|(offset, time)| LyricEntry {
                     id: 0,
+                    uid: 0,
+                    color_index: 0,
                     timestamp: time.as_timestamp(),
                     time,
                     text: text.clone(),
