@@ -113,6 +113,7 @@ impl LrcDocument {
     }
 }
 
+#[allow(dead_code)]
 pub fn reconcile_identity(
     old_doc: Option<&LrcDocument>,
     new_doc: &mut LrcDocument,

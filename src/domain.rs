@@ -11,12 +11,14 @@ pub use parser::LrcParser;
 pub use selection::{SelectionState, SelectionMode};
 pub use time::{TimeMs, Pixels};
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vec2 {
     pub x: f64,
     pub y: f64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
     pub x: f64,
