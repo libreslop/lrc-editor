@@ -25,9 +25,19 @@ pub fn playback_controls(props: &PlaybackControlsProps) -> Html {
     };
 
     let scroll_handle_style = if props.total_width > 0.0 {
-        let ratio = (props.viewport_width / props.total_width).min(1.0);
-        let left_ratio = (props.scroll_left / props.total_width).min(1.0 - ratio);
-        format!("width: {}%; left: {}%;", ratio * 100.0, left_ratio * 100.0)
+        let handle_ratio = (props.viewport_width / props.total_width).min(1.0);
+        let viewport_scrollable_width = props.total_width - props.viewport_width;
+        let scroll_ratio = if viewport_scrollable_width > 0.0 {
+            (props.scroll_left / viewport_scrollable_width).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        format!(
+            "width: max(20px, {}%); left: calc({} * (100% - max(20px, {}%)));",
+            handle_ratio * 100.0,
+            scroll_ratio,
+            handle_ratio * 100.0
+        )
     } else {
         "width: 100%; left: 0%;".to_string()
     };

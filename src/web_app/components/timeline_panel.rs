@@ -29,16 +29,18 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let waveform_summary = use_state(|| None::<Rc<WaveformSummary>>);
     let scroll_left = use_state(|| 0.0);
     let viewport_width = use_state(|| 0.0);
+    let scroll_width = use_state(|| 0.0);
 
     let drag_mode = use_state(|| None::<DragTarget>);
     let suppress_panning = use_state(|| false);
-    let drag_start_x = use_state(|| Pixels(0.0));
+    let drag_start_x = use_mut_ref(|| 0.0);
     let drag_start_y = use_state(|| Pixels(0.0));
     let selection_rect = use_state(|| None::<(f64, f64, f64, f64)>);
     let drag_offset_ms = use_state(|| 0i32);
     let drag_target_uid = use_state(|| None::<usize>);
-    let drag_start_scroll = use_state(|| 0.0);
-    let drag_scrollbar_track_width = use_state(|| 1.0);
+    let drag_scrollbar_track_left = use_mut_ref(|| 0.0);
+    let drag_scrollbar_track_width = use_mut_ref(|| 1.0);
+    let drag_scrollbar_handle_offset = use_mut_ref(|| 0.0);
     let is_scrollbar_dragged = use_mut_ref(|| false);
     let last_mouse_pos = use_mut_ref(|| (0.0, 0.0));
 
@@ -236,11 +238,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         *current_time_ref.borrow_mut() = props.state.current_time_ms;
 
         let bounds_ref = yew::use_mut_ref(|| TimeMs(0));
-        *bounds_ref.borrow_mut() = {
-            let audio_dur = props.state.duration_ms;
-            let last_lyric = props.state.document.as_ref().and_then(|d| d.last_entry_time_ms()).unwrap_or(TimeMs(0));
-            TimeMs(audio_dur.as_u32().max(last_lyric.as_u32()) + 10000)
-        };
+        *bounds_ref.borrow_mut() = props.state.max_timeline_duration();
 
         let last_seek_ref = yew::use_mut_ref(|| props.state.last_seek_request);
         *last_seek_ref.borrow_mut() = props.state.last_seek_request;
@@ -377,9 +375,14 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     let on_viewport_scroll = {
         let scroll_left = scroll_left.clone();
+        let scroll_width = scroll_width.clone();
+        let is_scrollbar_dragged = is_scrollbar_dragged.clone();
         Callback::from(move |e: Event| {
             if let Some(viewport) = e.target_dyn_into::<web_sys::HtmlElement>() {
-                scroll_left.set(viewport.scroll_left() as f64);
+                if !*is_scrollbar_dragged.borrow() {
+                    scroll_left.set(viewport.scroll_left() as f64);
+                }
+                scroll_width.set(viewport.scroll_width() as f64);
             }
         })
     };
@@ -423,41 +426,70 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     let on_scrollbar_mousedown = {
         let viewport_ref = viewport_ref.clone();
-        let total_width = width_px.as_f64();
+        let viewport_width = viewport_width.clone();
+        let scroll_width = scroll_width.clone();
         let scroll_left_state = scroll_left.clone();
         let drag_mode = drag_mode.clone();
-        let drag_start_x = drag_start_x.clone();
-        let drag_start_scroll = drag_start_scroll.clone();
+        let drag_scrollbar_track_left = drag_scrollbar_track_left.clone();
         let drag_scrollbar_track_width = drag_scrollbar_track_width.clone();
+        let drag_scrollbar_handle_offset = drag_scrollbar_handle_offset.clone();
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
 
         Callback::from(move |e: MouseEvent| {
             if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let track_element = e.current_target().unwrap().dyn_into::<web_sys::HtmlElement>().unwrap();
                 let rect = track_element.get_bounding_client_rect();
-                drag_scrollbar_track_width.set(rect.width());
+                let track_left = rect.left();
+                let track_width = rect.width();
+                *drag_scrollbar_track_left.borrow_mut() = track_left;
+                *drag_scrollbar_track_width.borrow_mut() = track_width;
                 
                 let target = e.target().unwrap().dyn_into::<web_sys::HtmlElement>().unwrap();
                 let is_handle = target.class_list().contains("custom-scrollbar-handle");
 
+                let vp_width = vp.client_width() as f64;
+                let vp_scroll_width = vp.scroll_width() as f64;
+                viewport_width.set(vp_width);
+                scroll_width.set(vp_scroll_width);
+
                 if is_handle {
+                    let handle_rect = target.get_bounding_client_rect();
+                    *drag_scrollbar_handle_offset.borrow_mut() = e.client_x() as f64 - handle_rect.left();
                     *is_scrollbar_dragged.borrow_mut() = true;
                     drag_mode.set(Some(DragTarget::Scrollbar));
-                    drag_start_x.set(Pixels(e.client_x() as f64));
-                    drag_start_scroll.set(*scroll_left_state);
                     e.stop_propagation();
                 } else {
-                    let click_x = e.client_x() as f64 - rect.left();
-                    let ratio = (click_x / rect.width()).clamp(0.0, 1.0);
-                    let target_scroll = ratio * total_width - vp.client_width() as f64 / 2.0;
-                    vp.set_scroll_left(target_scroll as i32);
-                    let new_scroll = vp.scroll_left() as f64;
-                    scroll_left_state.set(new_scroll);
+                    let handle_el = track_element.query_selector(".custom-scrollbar-handle").ok().flatten()
+                        .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
+                    let handle_width = if let Some(el) = &handle_el { el.get_bounding_client_rect().width() } else { 20.0 };
                     
+                    let track_scrollable_width = track_width - handle_width;
+                    let viewport_scrollable_width = (vp_scroll_width - vp_width).max(0.0);
+
+                    let click_x = e.client_x() as f64 - track_left;
+                    let target_handle_left = click_x - handle_width / 2.0;
+                    let clamped_handle_left = target_handle_left.clamp(0.0, track_scrollable_width);
+                    
+                    let target_scroll = if track_scrollable_width > 0.0 {
+                        (clamped_handle_left / track_scrollable_width) * viewport_scrollable_width
+                    } else {
+                        0.0
+                    };
+
+                    vp.set_scroll_left(target_scroll as i32);
+                    scroll_left_state.set(target_scroll);
+
+                    if let Some(handle) = &handle_el {
+                        let _ = handle.set_attribute("style", &format!(
+                            "width: max(20px, {}%); left: {}px;",
+                            (vp_width / vp_scroll_width).min(1.0) * 100.0,
+                            clamped_handle_left
+                        ));
+                    }
+
+                    *drag_scrollbar_handle_offset.borrow_mut() = handle_width / 2.0;
                     *is_scrollbar_dragged.borrow_mut() = true;
                     drag_mode.set(Some(DragTarget::Scrollbar));
-                    drag_start_x.set(Pixels(e.client_x() as f64));
-                    drag_start_scroll.set(new_scroll);
                 }
             }
         })
@@ -466,12 +498,15 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     {
         let viewport_ref = viewport_ref.clone();
         let viewport_width = viewport_width.clone();
+        let scroll_width = scroll_width.clone();
         use_effect_with((), move |_| {
             let vw_clone = viewport_width.clone();
+            let sw_clone = scroll_width.clone();
             let vr_clone = viewport_ref.clone();
             let listener = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
                 if let Some(v) = vr_clone.cast::<web_sys::HtmlElement>() {
                     vw_clone.set(v.client_width() as f64);
+                    sw_clone.set(v.scroll_width() as f64);
                 }
             }) as Box<dyn FnMut()>);
             
@@ -480,11 +515,28 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             
             if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 viewport_width.set(v.client_width() as f64);
+                scroll_width.set(v.scroll_width() as f64);
             }
             
             move || {
                 window.remove_event_listener_with_callback("resize", listener.as_ref().unchecked_ref()).unwrap();
             }
+        });
+    }
+
+    // Keep viewport dimensions updated when layout constraints change (zoom/duration)
+    {
+        let viewport_ref = viewport_ref.clone();
+        let viewport_width = viewport_width.clone();
+        let scroll_width = scroll_width.clone();
+        let zoom_level = props.state.zoom_level;
+        let duration = props.state.max_timeline_duration();
+        use_effect_with((zoom_level, duration), move |_| {
+            if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                viewport_width.set(v.client_width() as f64);
+                scroll_width.set(v.scroll_width() as f64);
+            }
+            || ()
         });
     }
 
@@ -689,7 +741,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 let y = e.client_y() as f64 - rect.top();
                 
                 drag_mode.set(Some(DragTarget::Selection));
-                drag_start_x.set(Pixels(x));
+                *drag_start_x.borrow_mut() = x;
                 drag_start_y.set(Pixels(y));
                 *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
             }
@@ -707,7 +759,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         Callback::from(move |e: MouseEvent| {
             e.stop_propagation();
             drag_mode.set(Some(DragTarget::Playhead));
-            drag_start_x.set(Pixels(e.client_x() as f64));
+            *drag_start_x.borrow_mut() = e.client_x() as f64;
             *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
             
             if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
@@ -740,14 +792,15 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let last_mouse_pos = last_mouse_pos.clone();
         let scroll_left_state = scroll_left.clone();
 
-        let drag_start_scroll = drag_start_scroll.clone();
-        let drag_scrollbar_track_width = drag_scrollbar_track_width.clone();
+        let drag_scrollbar_handle_offset = drag_scrollbar_handle_offset.clone();
+        let viewport_width = viewport_width.clone();
+        let scroll_width = scroll_width.clone();
 
         Callback::from(move |e: MouseEvent| {
             *last_mouse_pos.borrow_mut() = (e.client_x() as f64, e.client_y() as f64);
             
             if let Some(mode) = *drag_mode {
-                let delta_x = e.client_x() as f64 - drag_start_x.as_f64();
+                let delta_x = e.client_x() as f64 - *drag_start_x.borrow();
                 
                 if mode == DragTarget::Playhead {
                     if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
@@ -772,7 +825,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         let current_x = e.client_x() as f64 - rect.left() + v.scroll_left() as f64;
                         let current_y = e.client_y() as f64 - rect.top();
                         
-                        let start_x = drag_start_x.as_f64();
+                        let start_x = *drag_start_x.borrow();
                         let start_y = drag_start_y.as_f64();
                         
                         let x = start_x.min(current_x);
@@ -784,10 +837,48 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     }
                 } else if mode == DragTarget::Scrollbar {
                     if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                        let delta_scroll = (delta_x / *drag_scrollbar_track_width) * width_px.as_f64();
-                        let new_scroll = *drag_start_scroll + delta_scroll;
-                        v.set_scroll_left(new_scroll as i32);
-                        scroll_left_state.set(v.scroll_left() as f64);
+                        let document = web_sys::window().unwrap().document().unwrap();
+                        let track_el = document.query_selector(".custom-scrollbar-track").ok().flatten()
+                            .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
+                        let handle_el = document.query_selector(".custom-scrollbar-handle").ok().flatten()
+                            .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
+
+                        if let (Some(track), Some(handle)) = (track_el, handle_el) {
+                            let track_rect = track.get_bounding_client_rect();
+                            let handle_rect = handle.get_bounding_client_rect();
+
+                            let track_left = track_rect.left();
+                            let track_width = track_rect.width();
+                            let handle_width = handle_rect.width();
+
+                            let vp_width = v.client_width() as f64;
+                            let vp_scroll_width = v.scroll_width() as f64;
+                            viewport_width.set(vp_width);
+                            scroll_width.set(vp_scroll_width);
+
+                            let track_scrollable_width = track_width - handle_width;
+                            let viewport_scrollable_width = (vp_scroll_width - vp_width).max(0.0);
+
+                            let mouse_x = e.client_x() as f64 - track_left;
+                            let handle_offset = *drag_scrollbar_handle_offset.borrow();
+                            let target_handle_left = mouse_x - handle_offset;
+                            let clamped_handle_left = target_handle_left.clamp(0.0, track_scrollable_width);
+
+                            let target_scroll = if track_scrollable_width > 0.0 {
+                                (clamped_handle_left / track_scrollable_width) * viewport_scrollable_width
+                            } else {
+                                0.0
+                            };
+
+                            v.set_scroll_left(target_scroll as i32);
+                            scroll_left_state.set(target_scroll);
+
+                            let _ = handle.set_attribute("style", &format!(
+                                "width: max(20px, {}%); left: {}px;",
+                                (vp_width / vp_scroll_width).min(1.0) * 100.0,
+                                clamped_handle_left
+                            ));
+                        }
                     }
                 } else {
                     let delta_ms = (delta_x / px_per_second.as_f64() * 1000.0) as i32;
@@ -806,6 +897,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
         let pan_velocity = pan_velocity.clone();
         let px_per_second = px_per_second;
+        let viewport_ref = viewport_ref.clone();
+        let scroll_left = scroll_left.clone();
         
         Callback::from(move |e: MouseEvent| {
             *is_scrollbar_dragged.borrow_mut() = false;
@@ -887,7 +980,11 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         }
                         selection_rect.set(None);
                     }
-                    DragTarget::Scrollbar => {}
+                    DragTarget::Scrollbar => {
+                        if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                            scroll_left.set(v.scroll_left() as f64);
+                        }
+                    }
                 }
                 drag_mode.set(None);
                 drag_offset_ms.set(0);
@@ -946,7 +1043,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 let _ = viewport.focus();
             }
             drag_mode.set(Some(target));
-            drag_start_x.set(Pixels(e.client_x() as f64));
+            *drag_start_x.borrow_mut() = e.client_x() as f64;
             drag_target_uid.set(Some(uid));
         })
     };
@@ -988,7 +1085,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 on_zoom_out={zoom_out}
                 scroll_left={*scroll_left}
                 viewport_width={*viewport_width}
-                total_width={width_px.as_f64()}
+                total_width={if *scroll_width > 0.0 { *scroll_width } else { width_px.as_f64() }}
                 on_scrollbar_mousedown={on_scrollbar_mousedown}
             />
             <div class="timeline-body">
