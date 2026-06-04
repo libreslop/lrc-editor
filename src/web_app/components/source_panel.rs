@@ -1,6 +1,107 @@
 use yew::prelude::*;
 use crate::web_app::actions::{AppState, AppAction};
-use web_sys::HtmlTextAreaElement;
+use web_sys::{HtmlTextAreaElement, HtmlElement};
+
+fn is_timestamp(tag: &str) -> bool {
+    if let Some(c) = tag.chars().next() {
+        c.is_ascii_digit()
+    } else {
+        false
+    }
+}
+
+fn highlight_line(line: &str) -> Vec<Html> {
+    let mut nodes = Vec::new();
+    if line.is_empty() {
+        return nodes;
+    }
+
+    let mut rest = line;
+    
+    // 1. Scan bracketed tags at the start of the line (can be multiple)
+    while rest.starts_with('[') {
+        if let Some(close_idx) = rest.find(']') {
+            let tag_content = &rest[1..close_idx];
+            
+            nodes.push(html! { <span class="hl-bracket">{"["}</span> });
+            if is_timestamp(tag_content) {
+                nodes.push(html! { <span class="hl-timestamp">{tag_content}</span> });
+            } else if tag_content.contains(':') {
+                if let Some(colon_idx) = tag_content.find(':') {
+                    let key = &tag_content[0..colon_idx];
+                    let val = &tag_content[colon_idx+1..];
+                    nodes.push(html! { <span class="hl-metadata-key">{key}</span> });
+                    nodes.push(html! { <span class="hl-metadata-colon">{":"}</span> });
+                    nodes.push(html! { <span class="hl-metadata-value">{val}</span> });
+                } else {
+                    nodes.push(html! { <span class="hl-metadata-key">{tag_content}</span> });
+                }
+            } else {
+                nodes.push(html! { <span class="hl-invalid">{tag_content}</span> });
+            }
+            nodes.push(html! { <span class="hl-bracket">{"]"}</span> });
+            
+            rest = &rest[close_idx + 1..];
+        } else {
+            nodes.push(html! { <span class="hl-invalid">{rest}</span> });
+            rest = "";
+            break;
+        }
+    }
+
+    // 2. Scan remaining text for word timestamps like `<00:12.50>`
+    let mut text_rest = rest;
+    while !text_rest.is_empty() {
+        if let Some(open_idx) = text_rest.find('<') {
+            if open_idx > 0 {
+                let text_segment = &text_rest[0..open_idx];
+                nodes.push(html! { <span class="hl-lyric">{text_segment}</span> });
+            }
+            
+            let bracket_rest = &text_rest[open_idx..];
+            if let Some(close_idx) = bracket_rest.find('>') {
+                let tag_content = &bracket_rest[1..close_idx];
+                nodes.push(html! { <span class="hl-bracket">{"<"}</span> });
+                if is_timestamp(tag_content) {
+                    nodes.push(html! { <span class="hl-timestamp-word">{tag_content}</span> });
+                } else {
+                    nodes.push(html! { <span class="hl-invalid">{tag_content}</span> });
+                }
+                nodes.push(html! { <span class="hl-bracket">{">"}</span> });
+                text_rest = &bracket_rest[close_idx + 1..];
+            } else {
+                nodes.push(html! { <span class="hl-invalid">{bracket_rest}</span> });
+                break;
+            }
+        } else {
+            nodes.push(html! { <span class="hl-lyric">{text_rest}</span> });
+            break;
+        }
+    }
+
+    nodes
+}
+
+fn highlight_lrc(text: &str) -> Html {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut line_elements = Vec::new();
+
+    for (idx, line) in lines.iter().enumerate() {
+        let highlighted_line_nodes = highlight_line(line);
+        for node in highlighted_line_nodes {
+            line_elements.push(node);
+        }
+        if idx < lines.len() - 1 {
+            line_elements.push(html! { "\n" });
+        }
+    }
+
+    html! {
+        <>
+            { for line_elements }
+        </>
+    }
+}
 
 #[derive(Properties, PartialEq)]
 pub struct SourcePanelProps {
@@ -45,6 +146,34 @@ pub fn source_panel(props: &SourcePanelProps) -> Html {
     let invalid_class = if state.document.parse_error.is_some() { "invalid" } else { "" };
 
     let textarea_ref = use_node_ref();
+    let highlight_ref = use_node_ref();
+
+    let onscroll = {
+        let textarea_ref = textarea_ref.clone();
+        let highlight_ref = highlight_ref.clone();
+        Callback::from(move |_e: Event| {
+            if let Some(textarea) = textarea_ref.cast::<HtmlTextAreaElement>() {
+                if let Some(highlight) = highlight_ref.cast::<HtmlElement>() {
+                    highlight.set_scroll_top(textarea.scroll_top());
+                    highlight.set_scroll_left(textarea.scroll_left());
+                }
+            }
+        })
+    };
+
+    {
+        let textarea_ref = textarea_ref.clone();
+        let highlight_ref = highlight_ref.clone();
+        let source_text = state.document.source_text.clone();
+        use_effect_with(source_text, move |_| {
+            if let Some(textarea) = textarea_ref.cast::<HtmlTextAreaElement>() {
+                if let Some(highlight) = highlight_ref.cast::<HtmlElement>() {
+                    highlight.set_scroll_top(textarea.scroll_top());
+                    highlight.set_scroll_left(textarea.scroll_left());
+                }
+            }
+        });
+    }
 
     let onmouseenter = {
         let textarea_ref = textarea_ref.clone();
@@ -84,16 +213,23 @@ pub fn source_panel(props: &SourcePanelProps) -> Html {
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                 </button>
             </div>
-            <textarea 
-                ref={textarea_ref}
-                class={classes!("source-editor", invalid_class)}
-                value={state.document.source_text.clone()}
-                {oninput}
-                {onchange}
-                {onmouseenter}
-                {onmouseleave}
-                spellcheck="false"
-            />
+            <div class={classes!("editor-container", invalid_class)}>
+                <pre ref={highlight_ref} class="source-highlight">
+                    { highlight_lrc(&state.document.source_text) }
+                    { "\u{200b}" }
+                </pre>
+                <textarea 
+                    ref={textarea_ref}
+                    class="source-editor"
+                    value={state.document.source_text.clone()}
+                    {oninput}
+                    {onchange}
+                    {onscroll}
+                    {onmouseenter}
+                    {onmouseleave}
+                    spellcheck="false"
+                />
+            </div>
             if let Some(err) = &state.document.parse_error {
                 <div class="toast">
                     { err }
@@ -102,3 +238,4 @@ pub fn source_panel(props: &SourcePanelProps) -> Html {
         </div>
     }
 }
+
