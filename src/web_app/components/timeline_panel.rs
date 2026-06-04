@@ -246,7 +246,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let viewport_ref = viewport_ref.clone();
         let px_per_second = px_per_second;
 
-        use_effect_with((current_time_ms, playing, drag_mode), move |(time, playing, mode)| {
+        use_effect_with((current_time_ms, playing, drag_mode, px_per_second), move |(time, playing, mode, px_per_second)| {
             if !*playing && *mode != Some(DragTarget::Playhead) {
                 if let (Some(p), _) = (
                     playhead_ref.cast::<web_sys::HtmlElement>(),
@@ -266,7 +266,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let playing = props.state.playing;
         let viewport_ref = viewport_ref.clone();
         let px_per_second = px_per_second;
-        use_effect_with((current_time_ms, playing), move |(time, playing)| {
+        use_effect_with((current_time_ms, playing, px_per_second), move |(time, playing, px_per_second)| {
             if !*playing {
                 if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
                     let px = px_per_second.as_f64();
