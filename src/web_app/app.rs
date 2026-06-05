@@ -103,13 +103,16 @@ pub fn app() -> Html {
         );
     }
 
+    let state_ref = yew::use_mut_ref(|| state.clone());
+    *state_ref.borrow_mut() = state.clone();
+
     {
-        let state = state.clone();
+        let state_ref = state_ref.clone();
         let show_help = show_help.clone();
         use_effect_with(show_help.clone(), move |show_help_val| {
             let is_help_open = **show_help_val;
             let window = web_sys::window().unwrap();
-            let state = state.clone();
+            let state_ref = state_ref.clone();
             let show_help = show_help.clone();
             
             let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
@@ -118,6 +121,19 @@ pub fn app() -> Html {
                     return;
                 }
 
+                let current_state = state_ref.borrow().clone();
+                let ctrl = e.ctrl_key() || e.meta_key();
+                let shift = e.shift_key();
+                let key = e.key();
+
+                // 1. Ctrl + S for exporting lrc file (works globally, including in textareas)
+                if ctrl && (key == "s" || key == "S") {
+                    e.prevent_default();
+                    current_state.trigger_lrc_export();
+                    return;
+                }
+
+                // 2. Ignore other editing/navigation shortcuts when typing in text fields
                 if let Some(target) = e.target() {
                     if let Ok(el) = target.dyn_into::<web_sys::HtmlElement>() {
                         let tag = el.tag_name();
@@ -127,29 +143,71 @@ pub fn app() -> Html {
                     }
                 }
 
-                let ctrl = e.ctrl_key() || e.meta_key();
-                let shift = e.shift_key();
-
-                match e.key().as_str() {
+                match key.as_str() {
                     " " => {
                         e.prevent_default();
-                        state.dispatch(AppAction::TogglePlay);
+                        current_state.dispatch(AppAction::TogglePlay);
                     }
                     "z" | "Z" if ctrl && !shift => {
                         e.prevent_default();
-                        state.dispatch(AppAction::Undo);
+                        current_state.dispatch(AppAction::Undo);
                     }
                     "y" | "Y" if ctrl => {
                         e.prevent_default();
-                        state.dispatch(AppAction::Redo);
+                        current_state.dispatch(AppAction::Redo);
                     }
                     "z" | "Z" if ctrl && shift => {
                         e.prevent_default();
-                        state.dispatch(AppAction::Redo);
+                        current_state.dispatch(AppAction::Redo);
                     }
                     "a" | "A" if ctrl => {
                         e.prevent_default();
-                        state.dispatch(AppAction::SelectAll);
+                        current_state.dispatch(AppAction::SelectAll);
+                    }
+                    "ArrowLeft" | "Left" => {
+                        e.prevent_default();
+                        let current = current_state.playback.current_time_ms.as_u32();
+                        let duration = current_state.playback.duration_ms;
+                        let mut edges = vec![0, duration.as_u32()];
+                        if let Some(doc) = &current_state.document.document {
+                            for chunk in doc.timeline_chunks(duration) {
+                                if !chunk.is_empty() {
+                                    edges.push(chunk.start_ms().as_u32());
+                                    edges.push(chunk.end_ms().as_u32());
+                                }
+                            }
+                        }
+                        edges.sort_unstable();
+                        edges.dedup();
+                        
+                        let target_u32 = edges.iter()
+                            .copied()
+                            .rev()
+                            .find(|&e| e < current)
+                            .unwrap_or(0);
+                        current_state.dispatch(AppAction::Seek(TimeMs(target_u32)));
+                    }
+                    "ArrowRight" | "Right" => {
+                        e.prevent_default();
+                        let current = current_state.playback.current_time_ms.as_u32();
+                        let duration = current_state.playback.duration_ms;
+                        let mut edges = vec![0, duration.as_u32()];
+                        if let Some(doc) = &current_state.document.document {
+                            for chunk in doc.timeline_chunks(duration) {
+                                if !chunk.is_empty() {
+                                    edges.push(chunk.start_ms().as_u32());
+                                    edges.push(chunk.end_ms().as_u32());
+                                }
+                            }
+                        }
+                        edges.sort_unstable();
+                        edges.dedup();
+                        
+                        let target_u32 = edges.iter()
+                            .copied()
+                            .find(|&e| e > current)
+                            .unwrap_or_else(|| duration.as_u32());
+                        current_state.dispatch(AppAction::Seek(TimeMs(target_u32)));
                     }
                     _ => {}
                 }

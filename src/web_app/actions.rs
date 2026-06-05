@@ -1,5 +1,6 @@
 use std::rc::Rc;
 use yew::prelude::*;
+use wasm_bindgen::JsCast;
 use crate::domain::{LrcDocument, LrcParser, SelectionState, SelectionMode, TimeMs};
 
 pub enum AppAction {
@@ -112,6 +113,35 @@ impl AppState {
             .and_then(|doc| doc.last_entry_time_ms())
             .unwrap_or(TimeMs(0));
         TimeMs(self.playback.duration_ms.as_u32().max(last_lyric_ms.as_u32()) + 15000)
+    }
+
+    pub fn trigger_lrc_export(&self) {
+        let text = self.document.source_text.clone();
+        if let Some(window) = web_sys::window() {
+            if let Some(document) = window.document() {
+                let filename = if let Some(audio_name) = &self.project.audio_filename {
+                    let base = audio_name.rfind('.').map(|i| &audio_name[..i]).unwrap_or(audio_name);
+                    format!("{}.lrc", base)
+                } else if let Some(lrc_name) = &self.project.lrc_filename {
+                    lrc_name.clone()
+                } else {
+                    "lyrics.lrc".to_string()
+                };
+
+                if let Ok(blob) = web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&text.into())) {
+                    if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) {
+                        if let Ok(a) = document.create_element("a") {
+                            if let Ok(a) = a.dyn_into::<web_sys::HtmlAnchorElement>() {
+                                a.set_href(&url);
+                                a.set_download(&filename);
+                                a.click();
+                                let _ = web_sys::Url::revoke_object_url(&url);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn update_document(&mut self, source: String) {

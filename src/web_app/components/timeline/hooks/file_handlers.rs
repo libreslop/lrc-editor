@@ -108,31 +108,7 @@ pub fn use_file_handlers(
     let export_lrc = {
         let state = state.clone();
         Callback::from(move |_| {
-            let text = state.document.source_text.clone();
-            let window = web_sys::window().unwrap();
-            let document = window.document().unwrap();
-            
-            let filename = if let Some(audio_name) = &state.project.audio_filename {
-                let base = audio_name.rfind('.').map(|i| &audio_name[..i]).unwrap_or(audio_name);
-                format!("{}.lrc", base)
-            } else if let Some(lrc_name) = &state.project.lrc_filename {
-                lrc_name.clone()
-            } else {
-                "lyrics.lrc".to_string()
-            };
-
-            if let Ok(blob) = web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&text.into())) {
-                if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) {
-                    if let Ok(a) = document.create_element("a") {
-                        if let Ok(a) = a.dyn_into::<web_sys::HtmlAnchorElement>() {
-                            a.set_href(&url);
-                            a.set_download(&filename);
-                            a.click();
-                            let _ = web_sys::Url::revoke_object_url(&url);
-                        }
-                    }
-                }
-            }
+            state.trigger_lrc_export();
         })
     };
 
