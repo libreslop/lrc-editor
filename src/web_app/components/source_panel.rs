@@ -1,6 +1,7 @@
 use yew::prelude::*;
 use crate::web_app::actions::{AppState, AppAction};
 use web_sys::{HtmlTextAreaElement, HtmlElement};
+use wasm_bindgen::JsCast;
 
 fn is_timestamp(tag: &str) -> bool {
     if let Some(c) = tag.chars().next() {
@@ -82,23 +83,32 @@ fn highlight_line(line: &str) -> Vec<Html> {
     nodes
 }
 
-fn highlight_lrc(text: &str) -> Html {
+fn highlight_lrc(text: &str, selected_line_idx: Option<usize>) -> Html {
     let lines: Vec<&str> = text.split('\n').collect();
-    let mut line_elements = Vec::new();
+    let mut divs = Vec::new();
 
     for (idx, line) in lines.iter().enumerate() {
-        let highlighted_line_nodes = highlight_line(line);
-        for node in highlighted_line_nodes {
-            line_elements.push(node);
+        let is_selected = Some(idx) == selected_line_idx;
+        let mut line_nodes = highlight_line(line);
+        if line_nodes.is_empty() {
+            line_nodes.push(html! { "\u{200b}" });
         }
-        if idx < lines.len() - 1 {
-            line_elements.push(html! { "\n" });
-        }
+        
+        let class = classes!(
+            "hl-line",
+            is_selected.then_some("selected")
+        );
+
+        divs.push(html! {
+            <div {class} data-line-idx={idx.to_string()}>
+                { for line_nodes }
+            </div>
+        });
     }
 
     html! {
         <>
-            { for line_elements }
+            { for divs }
         </>
     }
 }
@@ -130,6 +140,11 @@ pub struct SourcePanelProps {
 pub fn source_panel(props: &SourcePanelProps) -> Html {
     let state = props.state.clone();
     let last_positioned_selection = use_state(|| Vec::<usize>::new());
+    
+    let selected_line_idx = state.view.selection.last_selected_id()
+        .and_then(|sel_id| state.document.document.as_ref()
+            .and_then(|doc| doc.entry_by_uid(sel_id)
+                .map(|entry| entry.source_line.as_zero_based())));
     
     let oninput = {
         let state = state.clone();
@@ -191,6 +206,39 @@ pub fn source_panel(props: &SourcePanelProps) -> Html {
         });
     }
 
+    {
+        let textarea_ref = textarea_ref.clone();
+        let highlight_ref = highlight_ref.clone();
+        use_effect_with(selected_line_idx, move |&sel_idx| {
+            if sel_idx.is_some() {
+                if let Some(textarea) = textarea_ref.cast::<HtmlTextAreaElement>() {
+                    if let Some(highlight) = highlight_ref.cast::<HtmlElement>() {
+                        if let Some(selected_el) = highlight.query_selector(".hl-line.selected").ok().flatten() {
+                            if let Ok(html_el) = selected_el.dyn_into::<HtmlElement>() {
+                                let offset_top = html_el.offset_top();
+                                let offset_height = html_el.offset_height();
+                                let client_height = textarea.client_height();
+                                
+                                let target_scroll_top = offset_top - (client_height / 2) + (offset_height / 2);
+                                let target_scroll_top = target_scroll_top.max(0);
+                                
+                                if let Ok(scroll_to_val) = js_sys::Reflect::get(&textarea, &"scrollTo".into()) {
+                                    if let Some(scroll_to_func) = scroll_to_val.dyn_ref::<js_sys::Function>() {
+                                        let options = js_sys::Object::new();
+                                        let _ = js_sys::Reflect::set(&options, &"top".into(), &(target_scroll_top as f64).into());
+                                        let _ = js_sys::Reflect::set(&options, &"behavior".into(), &"smooth".into());
+                                        let _ = scroll_to_func.call1(&textarea, &options);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+
     let onmouseenter = {
         let textarea_ref = textarea_ref.clone();
         let state = state.clone();
@@ -249,7 +297,7 @@ pub fn source_panel(props: &SourcePanelProps) -> Html {
             </div>
             <div class={classes!("editor-container", invalid_class)}>
                 <pre ref={highlight_ref} class="source-highlight">
-                    { highlight_lrc(&state.document.source_text) }
+                    { highlight_lrc(&state.document.source_text, selected_line_idx) }
                     { "\u{200b}" }
                 </pre>
                 <textarea 

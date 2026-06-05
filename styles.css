@@ -362,6 +362,22 @@ svg {
   pointer-events: none;
 }
 
+.hl-line {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  box-sizing: border-box;
+  min-height: 1.56em;
+}
+
+.hl-line.selected {
+  background-color: rgba(31, 183, 176, 0.14);
+  border-left: 3px solid var(--teal);
+  padding-left: 11px;
+  margin-left: -14px;
+  margin-right: -14px;
+  padding-right: 14px;
+}
+
 .hl-bracket {
   color: var(--faint);
 }
