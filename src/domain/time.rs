@@ -134,11 +134,69 @@ mod tests {
     }
 }
 
+use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign};
+
 /// A physical pixel distance or coordinate on the screen.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
 pub struct Pixels(pub f64);
 
 impl Pixels {
+    pub fn as_f64(self) -> f64 {
+        self.0
+    }
+}
+
+impl Add for Pixels {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl Sub for Pixels {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        Self(self.0 - rhs.0)
+    }
+}
+
+impl Mul<f64> for Pixels {
+    type Output = Self;
+    fn mul(self, rhs: f64) -> Self {
+        Self(self.0 * rhs)
+    }
+}
+
+impl Div<f64> for Pixels {
+    type Output = Self;
+    fn div(self, rhs: f64) -> Self {
+        Self(self.0 / rhs)
+    }
+}
+
+impl AddAssign for Pixels {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
+}
+
+impl SubAssign for Pixels {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 -= rhs.0;
+    }
+}
+
+/// A zoom multiplier.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct ZoomLevel(pub f64);
+
+impl Default for ZoomLevel {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
+impl ZoomLevel {
     pub fn as_f64(self) -> f64 {
         self.0
     }

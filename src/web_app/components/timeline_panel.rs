@@ -3,7 +3,7 @@ use web_sys::HtmlAudioElement;
 use wasm_bindgen::JsCast;
 use std::rc::Rc;
 use crate::web_app::actions::{AppState, AppAction};
-use crate::domain::{TimeMs, Pixels};
+use crate::domain::{TimeMs, Pixels, ZoomLevel};
 use super::timeline::{PlaybackControls, TrackPads, TimelineLanes, DragTarget};
 use super::timeline::waveform_canvas::WaveformSummary;
 
@@ -14,7 +14,7 @@ pub struct TimelinePanelProps {
 
 #[function_component(TimelinePanel)]
 pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
-    let px_per_second = Pixels(92.0 * props.state.view.zoom_level);
+    let px_per_second = Pixels(92.0 * props.state.view.zoom_level.as_f64());
     
     let audio_ref = use_node_ref();
     let file_input_ref = use_node_ref();
@@ -406,7 +406,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let state = props.state.clone();
         let viewport_ref = viewport_ref.clone();
         let scroll_left_state = scroll_left.clone();
-        let px_per_second_val = 92.0 * props.state.view.zoom_level;
+        let px_per_second_val = 92.0 * props.state.view.zoom_level.as_f64();
         Callback::from(move |e: WheelEvent| {
             if e.ctrl_key() || e.meta_key() {
                 e.prevent_default();
@@ -424,13 +424,13 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         0.001
                     };
                     let zoom_factor = if e.delta_y() < 0.0 { 1.15 } else { 1.0 / 1.15 };
-                    let new_zoom = (state.view.zoom_level * zoom_factor).clamp(min_zoom, 10.0);
+                    let new_zoom = (state.view.zoom_level.as_f64() * zoom_factor).clamp(min_zoom, 10.0);
                     let new_px_per_second = 92.0 * new_zoom;
                     
                     let new_world_x = cursor_time_s * new_px_per_second;
                     let new_scroll_left = new_world_x - mouse_x;
                     
-                    state.dispatch(AppAction::SetZoom(new_zoom));
+                    state.dispatch(AppAction::SetZoom(ZoomLevel(new_zoom)));
                     vp.set_scroll_left(new_scroll_left as i32);
                     scroll_left_state.set(vp.scroll_left() as f64);
                 }
@@ -454,12 +454,15 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let track_rect = track.get_bounding_client_rect();
             let track_left = track_rect.left();
             let track_width = track_rect.width();
-            let handle_width = handle.get_bounding_client_rect().width();
 
             let vp_width = vp.client_width() as f64;
             let vp_scroll_width = vp.scroll_width() as f64;
             viewport_width.set(vp_width);
             viewport_scroll_width.set(vp_scroll_width);
+
+            // Calculate expected handle width to avoid using stale DOM width
+            let expected_handle_width = (track_width * (vp_width / vp_scroll_width).min(1.0)).max(20.0);
+            let handle_width = expected_handle_width;
 
             let track_scrollable_width = track_width - handle_width;
             let viewport_scrollable_width = (vp_scroll_width - vp_width).max(0.0);
@@ -522,17 +525,21 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     drag_mode.set(Some(DragTarget::Scrollbar));
                     e.stop_propagation();
                 } else {
-                    if let Some(handle) = track_element.query_selector(".custom-scrollbar-handle").ok().flatten()
+                    let document = web_sys::window().unwrap().document().unwrap();
+                    if let Some(handle) = document.query_selector(".custom-scrollbar-handle").ok().flatten()
                         .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok()) {
-                        let handle_width = handle.get_bounding_client_rect().width();
-                        let initial_offset = handle_width / 2.0;
+                        
+                        let expected_handle_width = (track_width * (vp_width / vp_scroll_width).min(1.0)).max(20.0);
+                        let initial_offset = expected_handle_width / 2.0;
+                        
+                        *is_scrollbar_dragged.borrow_mut() = true;
+                        drag_mode.set(Some(DragTarget::Scrollbar));
+
                         let clamped_left = update_scrollbar(&vp, &track_element, &handle, e.client_x() as f64, initial_offset);
 
                         let click_x = e.client_x() as f64 - track_left;
                         let actual_handle_offset = click_x - clamped_left;
                         *drag_scrollbar_handle_offset.borrow_mut() = actual_handle_offset;
-                        *is_scrollbar_dragged.borrow_mut() = true;
-                        drag_mode.set(Some(DragTarget::Scrollbar));
                         e.stop_propagation();
                     }
                 }
@@ -606,7 +613,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let viewport_ref = viewport_ref.clone();
         let viewport_width = viewport_width.clone();
         let viewport_scroll_width = viewport_scroll_width.clone();
-        let zoom_level = props.state.view.zoom_level;
+        let zoom_level = props.state.view.zoom_level.as_f64();
         let duration = props.state.max_timeline_duration();
         use_effect_with((zoom_level, duration), move |_| {
             if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
@@ -620,7 +627,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     // Auto-clamp zoom level if it is less than the dynamic min_zoom to fit the timeline
     {
         let state = props.state.clone();
-        let zoom_level = props.state.view.zoom_level;
+        let zoom_level = props.state.view.zoom_level.as_f64();
         let duration = props.state.max_timeline_duration();
         let viewport_width_val = *viewport_width;
         use_effect_with((zoom_level, duration.as_u32(), viewport_width_val), move |(zl, dur_u32, vw)| {
@@ -630,7 +637,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 if dur_secs > 0.0 {
                     let min_zoom = vw_val / (dur_secs * 92.0);
                     if *zl < min_zoom - 0.0001 {
-                        state.dispatch(AppAction::SetZoom(min_zoom));
+                        state.dispatch(AppAction::SetZoom(ZoomLevel(min_zoom)));
                     }
                 }
             }
@@ -645,247 +652,30 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         })
     };
 
-    let zoom_in = {
-        let state = props.state.clone();
-        let viewport_ref = viewport_ref.clone();
-        let zoom = state.view.zoom_level;
-        let current_time_ms = state.playback.current_time_ms;
-        let scroll_left_state = scroll_left.clone();
-        let viewport_width = viewport_width.clone();
-        Callback::from(move |_| {
-            let vp_width = *viewport_width;
-            let dur_secs = state.max_timeline_duration().to_secs();
-            let min_zoom = if vp_width > 0.0 && dur_secs > 0.0 {
-                vp_width / (dur_secs * 92.0)
-            } else {
-                0.001
-            };
-            let old_px_per_second = 92.0 * zoom;
-            let new_zoom = (zoom * 1.25).clamp(min_zoom, 10.0);
-            let new_px_per_second = 92.0 * new_zoom;
-            let playhead_x_old = current_time_ms.to_secs() * old_px_per_second;
-            let playhead_x_new = current_time_ms.to_secs() * new_px_per_second;
-            
-            let screen_x = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                playhead_x_old - vp.scroll_left() as f64
-            } else {
-                0.0
-            };
-            let new_scroll = playhead_x_new - screen_x;
-
-            state.dispatch(AppAction::SetZoom(new_zoom));
-            
-            if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                let vp_clone = vp.clone();
-                let scroll_left_state = scroll_left_state.clone();
-                let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
-                    vp_clone.set_scroll_left(new_scroll as i32);
-                    scroll_left_state.set(vp_clone.scroll_left() as f64);
-                });
-                let _ = web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(cb.unchecked_ref(), 0);
-            }
-        })
-    };
-
-    let zoom_out = {
-        let state = props.state.clone();
-        let viewport_ref = viewport_ref.clone();
-        let zoom = state.view.zoom_level;
-        let current_time_ms = state.playback.current_time_ms;
-        let scroll_left_state = scroll_left.clone();
-        let viewport_width = viewport_width.clone();
-        Callback::from(move |_| {
-            let vp_width = *viewport_width;
-            let dur_secs = state.max_timeline_duration().to_secs();
-            let min_zoom = if vp_width > 0.0 && dur_secs > 0.0 {
-                vp_width / (dur_secs * 92.0)
-            } else {
-                0.001
-            };
-            let old_px_per_second = 92.0 * zoom;
-            let new_zoom = (zoom / 1.25).clamp(min_zoom, 10.0);
-            let new_px_per_second = 92.0 * new_zoom;
-            let playhead_x_old = current_time_ms.to_secs() * old_px_per_second;
-            let playhead_x_new = current_time_ms.to_secs() * new_px_per_second;
-            
-            let screen_x = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                playhead_x_old - vp.scroll_left() as f64
-            } else {
-                0.0
-            };
-            let new_scroll = playhead_x_new - screen_x;
-
-            state.dispatch(AppAction::SetZoom(new_zoom));
-            
-            if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                let vp_clone = vp.clone();
-                let scroll_left_state = scroll_left_state.clone();
-                let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
-                    vp_clone.set_scroll_left(new_scroll as i32);
-                    scroll_left_state.set(vp_clone.scroll_left() as f64);
-                });
-                let _ = web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(cb.unchecked_ref(), 0);
-            }
-        })
-    };
+    let zoom_handlers = crate::web_app::components::timeline::hooks::zoom_handlers::use_zoom_handlers(
+        props.state.clone(),
+        viewport_ref.clone(),
+        scroll_left.clone(),
+        viewport_width.clone(),
+    );
+    let zoom_in = zoom_handlers.zoom_in;
+    let zoom_out = zoom_handlers.zoom_out;
 
     // Smooth playhead & auto pan
-    {
-        let playing = props.state.playback.playing;
-        let dragging_playhead = *drag_mode == Some(DragTarget::Playhead);
-        let playhead_ref = playhead_ref.clone();
-        let viewport_ref = viewport_ref.clone();
-        let timecode_ref = timecode_ref.clone();
-        let is_scrollbar_dragged = is_scrollbar_dragged.clone();
-        let last_mouse_pos = last_mouse_pos.clone();
-        let suppress_panning = suppress_panning.clone();
-        let scroll_left_state = scroll_left.clone();
-        let ignore_next_scroll = ignore_next_scroll.clone();
-        
-        let current_time_ms_ref = current_time_ms_ref.clone();
-        
-        let px_per_second_ref = px_per_second_ref.clone();
-        let state = props.state.clone();
-
-        use_effect_with((playing, dragging_playhead), move |(playing, dragging_playhead)| {
-            use wasm_bindgen::closure::Closure;
-            use std::rc::Rc;
-            use std::cell::RefCell;
-
-            let cb = Rc::new(RefCell::new(None::<Closure<dyn FnMut()>>));
-            let cb_clone = cb.clone();
-            
-            let frame_id = Rc::new(RefCell::new(None::<i32>));
-            let frame_id_clone = frame_id.clone();
-            
-            let playhead = playhead_ref.clone();
-            let viewport = viewport_ref.clone();
-            let timecode = timecode_ref.clone();
-            let last_mouse_pos = last_mouse_pos.clone();
-            let is_dragging = *dragging_playhead;
-            let suppress_panning = suppress_panning.clone();
-            let scroll_left_state = scroll_left_state.clone();
-            let state = state.clone();
-            let ignore_next_scroll = ignore_next_scroll.clone();
-
-            let mut prev_world_x_opt = None::<f64>;
-
-            if *playing || is_dragging {
-                *cb_clone.borrow_mut() = Some(Closure::wrap(Box::new({
-                    let ignore_next_scroll = ignore_next_scroll.clone();
-                    let suppress_panning = suppress_panning.clone();
-                    move || {
-                    if let (Some(p), Some(v)) = (
-                        playhead.cast::<web_sys::HtmlElement>(),
-                        viewport.cast::<web_sys::HtmlElement>(),
-                    ) {
-                        let rect = v.get_bounding_client_rect();
-                        let px = px_per_second_ref.borrow().as_f64();
-                        let current_time_ms = *current_time_ms_ref.borrow();
-                        
-                        let playhead_x = if is_dragging {
-                            let mouse_x = last_mouse_pos.borrow().x;
-                            let absolute_x = mouse_x - rect.left() + v.scroll_left() as f64;
-                            let duration_ms = state.max_timeline_duration();
-                            let width_px_val = duration_ms.to_secs() * px;
-                            
-                            let min_x = (v.scroll_left() as f64).max(0.0);
-                            let max_x = (v.scroll_left() as f64 + v.client_width() as f64).min(width_px_val);
-                            let clamped_x = absolute_x.clamp(min_x, max_x);
-
-                            let target_time_ms = (clamped_x / px * 1000.0) as i32;
-                            let new_time = TimeMs(target_time_ms.max(0) as u32);
-                            let snapped_time = crate::web_app::editor::timeline::TimelineSnapper::snap_playhead(
-                                &state,
-                                new_time,
-                                duration_ms,
-                                *px_per_second_ref.borrow(),
-                            );
-                            snapped_time.to_secs() * px
-                        } else {
-                            current_time_ms.to_secs() * px
-                        };
-                        
-                        let _ = p.set_attribute("style", &format!("transform: translateX({}px);", playhead_x));
-
-                        if !*is_scrollbar_dragged.borrow() && !is_dragging {
-                            let world_x = current_time_ms.to_secs() * px;
-                            let scroll_left = v.scroll_left() as f64;
-                            let client_width = v.client_width() as f64;
-                            let safe_zone = 90.0;
-                            
-                            let is_in_safe_zone = world_x < scroll_left + safe_zone || world_x > scroll_left + client_width - safe_zone;
-                            let is_off_screen = world_x < scroll_left || world_x > scroll_left + client_width;
-
-                            let mut entered_safe_zone = false;
-                            if let Some(prev_world_x) = prev_world_x_opt {
-                                let prev_is_in_safe_zone = prev_world_x < scroll_left + safe_zone || prev_world_x > scroll_left + client_width - safe_zone;
-                                let prev_is_off_screen = prev_world_x < scroll_left || prev_world_x > scroll_left + client_width;
-                                if !prev_is_in_safe_zone && !prev_is_off_screen && is_in_safe_zone {
-                                    entered_safe_zone = true;
-                                }
-                            }
-                            prev_world_x_opt = Some(world_x);
-
-                            let mut should_pan = is_off_screen;
-                            if is_in_safe_zone && entered_safe_zone && !*suppress_panning.borrow() {
-                                should_pan = true;
-                            }
-
-                            if should_pan {
-                                if world_x > scroll_left + client_width - safe_zone {
-                                    *ignore_next_scroll.borrow_mut() = true;
-                                    v.set_scroll_left((world_x - safe_zone) as i32);
-                                    scroll_left_state.set(v.scroll_left() as f64);
-                                } else if world_x < scroll_left + safe_zone {
-                                    *ignore_next_scroll.borrow_mut() = true;
-                                    v.set_scroll_left((world_x - client_width / 2.0) as i32);
-                                    scroll_left_state.set(v.scroll_left() as f64);
-                                }
-                            }
-
-                            let hit_right_border = world_x >= scroll_left + client_width - 1.0;
-                            if hit_right_border || !is_in_safe_zone {
-                                *suppress_panning.borrow_mut() = false;
-                            }
-                        }
-
-                        if let Some(tc) = timecode.cast::<web_sys::HtmlElement>() {
-                            let total_secs = current_time_ms.as_u32() / 1000;
-                            let mins = total_secs / 60;
-                            let secs = total_secs % 60;
-                            let ms = current_time_ms.as_u32() % 1000;
-                            tc.set_inner_text(&format!("{:02}:{:02}.{:03}", mins, secs, ms));
-                        }
-                    }
-                    if let Some(window) = web_sys::window() {
-                        if let Some(closure) = cb.borrow().as_ref() {
-                            if let Ok(id) = window.request_animation_frame(closure.as_ref().unchecked_ref()) {
-                                *frame_id_clone.borrow_mut() = Some(id);
-                            }
-                        }
-                    }
-                }}) as Box<dyn FnMut()>));
-                
-                if let Some(window) = web_sys::window() {
-                    if let Ok(id) = window.request_animation_frame(cb_clone.borrow().as_ref().unwrap().as_ref().unchecked_ref()) {
-                        *frame_id.borrow_mut() = Some(id);
-                    }
-                }
-            } else {
-                *cb_clone.borrow_mut() = None;
-            }
-            
-            move || {
-                if let Some(window) = web_sys::window() {
-                    if let Some(id) = *frame_id.borrow() {
-                        let _ = window.cancel_animation_frame(id);
-                    }
-                }
-                *cb_clone.borrow_mut() = None;
-            }
-        });
-    }
+    crate::web_app::components::timeline::hooks::playback_sync::use_playback_sync(
+        props.state.clone(),
+        drag_mode.clone(),
+        playhead_ref.clone(),
+        viewport_ref.clone(),
+        timecode_ref.clone(),
+        is_scrollbar_dragged.clone(),
+        last_mouse_pos.clone(),
+        suppress_panning.clone(),
+        scroll_left.clone(),
+        ignore_next_scroll.clone(),
+        current_time_ms_ref.clone(),
+        px_per_second_ref.clone(),
+    );
 
     let on_timeline_mousedown = {
         let drag_mode = drag_mode.clone();

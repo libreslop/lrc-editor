@@ -77,17 +77,17 @@ pub struct SavedAudio {
 }
 
 pub async fn load_audio_file() -> Option<SavedAudio> {
-    if let Ok(js_val) = load_audio_file_js().await {
-        if !js_val.is_null() && !js_val.is_undefined() {
-            let name = js_sys::Reflect::get(&js_val, &JsValue::from_str("name"))
-                .ok()?
-                .as_string()?;
-            let file = js_sys::Reflect::get(&js_val, &JsValue::from_str("file"))
-                .ok()?
-                .dyn_into::<web_sys::Blob>()
-                .ok()?;
-            return Some(SavedAudio { name, blob: file });
-        }
+    if let Ok(js_val) = load_audio_file_js().await
+        && !js_val.is_null() && !js_val.is_undefined()
+    {
+        let name = js_sys::Reflect::get(&js_val, &JsValue::from_str("name"))
+            .ok()?
+            .as_string()?;
+        let file = js_sys::Reflect::get(&js_val, &JsValue::from_str("file"))
+            .ok()?
+            .dyn_into::<web_sys::Blob>()
+            .ok()?;
+        return Some(SavedAudio { name, blob: file });
     }
     None
 }

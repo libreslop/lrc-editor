@@ -127,64 +127,62 @@ impl LrcDocument {
         }
         text
     }
-}
+    pub fn reconcile_identity(
+        &mut self,
+        old_doc: Option<&LrcDocument>,
+        next_uid: &mut usize,
+    ) {
+        let mut old_entries = old_doc.map(|d| d.entries().to_vec()).unwrap_or_default();
+        let new_entries = &mut self.entries;
 
-#[allow(dead_code)]
-pub fn reconcile_identity(
-    old_doc: Option<&LrcDocument>,
-    new_doc: &mut LrcDocument,
-    next_uid: &mut usize,
-) {
-    let mut old_entries = old_doc.map(|d| d.entries().to_vec()).unwrap_or_default();
-    let new_entries = new_doc.entries_mut();
-
-    // 1. First pass: exact matches (timestamp and text)
-    for entry in new_entries.iter_mut() {
-        if let Some(pos) = old_entries.iter().position(|e| e.time_ms() == entry.time_ms() && e.text() == entry.text()) {
-            let matched = old_entries.remove(pos);
-            entry.uid = matched.uid();
-            entry.color_index = matched.color_index();
+        // 1. First pass: exact matches (timestamp and text)
+        for entry in new_entries.iter_mut() {
+            if let Some(pos) = old_entries.iter().position(|e| e.time_ms() == entry.time_ms() && e.text() == entry.text()) {
+                let matched = old_entries.remove(pos);
+                entry.uid = matched.uid();
+                entry.color_index = matched.color_index();
+            }
         }
-    }
 
-    // 2. Second pass: text matches (timestamp changed)
-    for entry in new_entries.iter_mut() {
-        if entry.uid == 0
-            && let Some(pos) = old_entries.iter().position(|e| e.text() == entry.text()) {
-                let matched = old_entries.remove(pos);
-                entry.uid = matched.uid();
-                entry.color_index = matched.color_index();
-            }
-    }
+        // 2. Second pass: text matches (timestamp changed)
+        for entry in new_entries.iter_mut() {
+            if entry.uid == 0
+                && let Some(pos) = old_entries.iter().position(|e| e.text() == entry.text()) {
+                    let matched = old_entries.remove(pos);
+                    entry.uid = matched.uid();
+                    entry.color_index = matched.color_index();
+                }
+        }
 
-    // 3. Third pass: timestamp matches (text changed)
-    for entry in new_entries.iter_mut() {
-        if entry.uid == 0
-            && let Some(pos) = old_entries.iter().position(|e| e.time_ms() == entry.time_ms()) {
-                let matched = old_entries.remove(pos);
-                entry.uid = matched.uid();
-                entry.color_index = matched.color_index();
-            }
-    }
+        // 3. Third pass: timestamp matches (text changed)
+        for entry in new_entries.iter_mut() {
+            if entry.uid == 0
+                && let Some(pos) = old_entries.iter().position(|e| e.time_ms() == entry.time_ms()) {
+                    let matched = old_entries.remove(pos);
+                    entry.uid = matched.uid();
+                    entry.color_index = matched.color_index();
+                }
+        }
 
-    // 4. Final pass: brand new entries
-    for i in 0..new_entries.len() {
-        if new_entries[i].uid == 0 {
-            new_entries[i].uid = *next_uid;
-            *next_uid += 1;
-            
-            let prev_color = if i > 0 { Some(new_entries[i-1].color_index()) } else { None };
-            let next_color = if i + 1 < new_entries.len() && new_entries[i+1].uid != 0 {
-                Some(new_entries[i+1].color_index())
-            } else {
-                None
-            };
-            
-            let mut best_color = (prev_color.map(|c| c as usize).unwrap_or(5) + 1) % 6;
-            if Some(best_color as u8) == next_color {
-                best_color = (best_color + 1) % 6;
+        // 4. Final pass: brand new entries
+        for i in 0..new_entries.len() {
+            if new_entries[i].uid == 0 {
+                new_entries[i].uid = *next_uid;
+                *next_uid += 1;
+                
+                let prev_color = if i > 0 { Some(new_entries[i-1].color_index()) } else { None };
+                let next_color = if i + 1 < new_entries.len() && new_entries[i+1].uid != 0 {
+                    Some(new_entries[i+1].color_index())
+                } else {
+                    None
+                };
+                
+                let mut best_color = (prev_color.map(|c| c as usize).unwrap_or(5) + 1) % 6;
+                if Some(best_color as u8) == next_color {
+                    best_color = (best_color + 1) % 6;
+                }
+                new_entries[i].color_index = best_color as u8;
             }
-            new_entries[i].color_index = best_color as u8;
         }
     }
 }

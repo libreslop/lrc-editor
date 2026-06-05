@@ -262,21 +262,21 @@ impl<'a> TimelineEditor<'a> {
 
         let mut merged: Vec<Interval> = Vec::new();
         for i in resolved {
-            if let Some(last) = merged.last_mut() {
-                if last.is_empty && i.is_empty {
-                    last.end = i.end;
-                    continue;
-                }
+            if let Some(last) = merged.last_mut()
+                && last.is_empty && i.is_empty
+            {
+                last.end = i.end;
+                continue;
             }
             merged.push(i);
         }
 
         merged.retain(|i| i.end > i.start);
 
-        if let Some(last) = merged.last() {
-            if last.is_empty {
-                merged.pop();
-            }
+        if let Some(last) = merged.last()
+            && last.is_empty
+        {
+            merged.pop();
         }
 
         let mut text = String::new();
@@ -297,10 +297,10 @@ impl<'a> TimelineEditor<'a> {
             }
         }
         
-        if let Some(last) = merged.last() {
-            if first_non_empty_seen {
-                text.push_str(&format!("[{}]\n", last.end.as_timestamp()));
-            }
+        if let Some(last) = merged.last()
+            && first_non_empty_seen
+        {
+            text.push_str(&format!("[{}]\n", last.end.as_timestamp()));
         }
 
         text
@@ -345,10 +345,10 @@ impl TimelineSnapper {
             }
         }
 
-        if let Some(adjust) = best_adjust {
-            if adjust.abs() <= snap_threshold_ms {
-                return TimeMs((target_ms + adjust).max(0) as u32);
-            }
+        if let Some(adjust) = best_adjust
+            && adjust.abs() <= snap_threshold_ms
+        {
+            return TimeMs((target_ms + adjust).max(0) as u32);
         }
 
         target_time
@@ -380,10 +380,10 @@ impl TimelineSnapper {
             DragTarget::Boundary => {
                 if let Some(uid) = drag_target_uid {
                     moved_uids.push(uid);
-                    if let Some(doc) = &state.document.document {
-                        if let Some(next_uid) = doc.next_entry_uid(uid) {
-                            moved_uids.push(next_uid);
-                        }
+                    if let Some(doc) = &state.document.document
+                        && let Some(next_uid) = doc.next_entry_uid(uid)
+                    {
+                        moved_uids.push(next_uid);
                     }
                 }
             }
@@ -391,11 +391,12 @@ impl TimelineSnapper {
         }
 
         // Get static snap points (boundaries of all chunks not currently moving, plus timeline edges, playhead position, and audio end)
-        let mut static_points = Vec::new();
-        static_points.push(0);
-        static_points.push(duration_ms.as_u32());
-        static_points.push(state.playback.current_time_ms.as_u32());
-        static_points.push(state.playback.duration_ms.as_u32());
+        let mut static_points = vec![
+            0,
+            duration_ms.as_u32(),
+            state.playback.current_time_ms.as_u32(),
+            state.playback.duration_ms.as_u32(),
+        ];
         if let Some(doc) = &state.document.document {
             let chunks = doc.timeline_chunks(duration_ms);
             for chunk in chunks {
@@ -419,20 +420,14 @@ impl TimelineSnapper {
                             moving_edges.push(chunk.start_ms().as_u32() as i32 + raw_offset_ms);
                             moving_edges.push(chunk.end_ms().as_u32() as i32 + raw_offset_ms);
                         }
-                        DragTarget::LeftEdge => {
-                            if Some(chunk.uid()) == drag_target_uid {
-                                moving_edges.push(chunk.start_ms().as_u32() as i32 + raw_offset_ms);
-                            }
+                        DragTarget::LeftEdge if Some(chunk.uid()) == drag_target_uid => {
+                            moving_edges.push(chunk.start_ms().as_u32() as i32 + raw_offset_ms);
                         }
-                        DragTarget::RightEdge => {
-                            if Some(chunk.uid()) == drag_target_uid {
-                                moving_edges.push(chunk.end_ms().as_u32() as i32 + raw_offset_ms);
-                            }
+                        DragTarget::RightEdge if Some(chunk.uid()) == drag_target_uid => {
+                            moving_edges.push(chunk.end_ms().as_u32() as i32 + raw_offset_ms);
                         }
-                        DragTarget::Boundary => {
-                            if Some(chunk.uid()) == drag_target_uid {
-                                moving_edges.push(chunk.end_ms().as_u32() as i32 + raw_offset_ms);
-                            }
+                        DragTarget::Boundary if Some(chunk.uid()) == drag_target_uid => {
+                            moving_edges.push(chunk.end_ms().as_u32() as i32 + raw_offset_ms);
                         }
                         _ => {}
                     }
@@ -450,10 +445,10 @@ impl TimelineSnapper {
             }
         }
 
-        if let Some(adjust) = best_adjust {
-            if adjust.abs() <= snap_threshold_ms {
-                return raw_offset_ms + adjust;
-            }
+        if let Some(adjust) = best_adjust
+            && adjust.abs() <= snap_threshold_ms
+        {
+            return raw_offset_ms + adjust;
         }
 
         raw_offset_ms

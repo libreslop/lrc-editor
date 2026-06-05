@@ -36,7 +36,7 @@ pub fn app() -> Html {
                 history_index: 0,
             },
             view: crate::web_app::actions::ViewState {
-                zoom_level: 0.25,
+                zoom_level: crate::domain::ZoomLevel(0.25),
                 selection: crate::domain::SelectionState::default(),
             },
             project: crate::web_app::actions::ProjectState {
