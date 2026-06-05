@@ -191,7 +191,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             (dur * 1000.0) as u32
                         };
                         
-                        if local_current_f64 < audio_dur_ms as f64 {
+                        let near_end = audio_dur_ms > 300 && local_current_f64 >= (audio_dur_ms as f64 - 300.0);
+                        if local_current_f64 < audio_dur_ms as f64 && !audio.ended() && !near_end {
                             if !audio.seeking() && audio.ready_state() >= 2 && !seek_just_handled { // HAVE_CURRENT_DATA
                                 let audio_time_ms = audio.current_time() * 1000.0;
                                 local_current_f64 = audio_time_ms;
