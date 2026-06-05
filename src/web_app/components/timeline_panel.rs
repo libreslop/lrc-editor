@@ -192,9 +192,16 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 let start_time = *current_time_ref.borrow();
                 
                 if let Some(audio) = audio_ref.cast::<web_sys::HtmlAudioElement>() {
-                    let audio_dur_ms = (audio.duration() * 1000.0) as u32;
+                    let dur = audio.duration();
+                    let audio_dur_ms = if dur.is_nan() || dur.is_infinite() {
+                        0
+                    } else {
+                        (dur * 1000.0) as u32
+                    };
                     if start_time.as_u32() < audio_dur_ms {
-                        audio.set_current_time(start_time.to_secs());
+                        if audio.ready_state() >= 1 {
+                            audio.set_current_time(start_time.to_secs());
+                        }
                         let _ = audio.play();
                     } else {
                         let _ = audio.pause();
@@ -205,7 +212,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 let last_time_ref = std::rc::Rc::new(std::cell::Cell::new(last_time));
                 
                 let mut local_current_f64 = start_time.as_u32() as f64;
-                let mut last_handled_seek = *last_seek_ref.borrow();
+                let mut last_handled_seek = None;
                 let mut bypass_sync_frames = 0;
                 
                 let interval = gloo_timers::callback::Interval::new(16, move || {
@@ -225,7 +232,12 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     }
                     
                     if let Some(audio) = audio_ref.cast::<web_sys::HtmlAudioElement>() {
-                        let audio_dur_ms = (audio.duration() * 1000.0) as u32;
+                        let dur = audio.duration();
+                        let audio_dur_ms = if dur.is_nan() || dur.is_infinite() {
+                            0
+                        } else {
+                            (dur * 1000.0) as u32
+                        };
                         if local_current_f64 + 200.0 < audio_dur_ms as f64 && !audio.paused() && !audio.ended() {
                             let audio_time_ms = audio.current_time() * 1000.0;
                             if bypass_sync_frames > 0 {
@@ -280,7 +292,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let ignore_next_scroll = ignore_next_scroll.clone();
             if let Some(time_ms) = seek {
                 if let Some(audio) = audio_ref.cast::<HtmlAudioElement>() {
-                    audio.set_current_time(time_ms.to_secs());
+                    if audio.ready_state() >= 1 {
+                        audio.set_current_time(time_ms.to_secs());
+                    }
                 }
 
                 if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {

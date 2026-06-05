@@ -130,7 +130,13 @@ pub fn use_file_handlers(
         let state = state.clone();
         Callback::from(move |e: Event| {
             if let Some(audio) = e.target_dyn_into::<web_sys::HtmlAudioElement>() {
-                state.dispatch(AppAction::SetDuration(crate::domain::TimeMs((audio.duration() * 1000.0) as u32)));
+                let dur = audio.duration();
+                let audio_dur_ms = if dur.is_nan() || dur.is_infinite() {
+                    0
+                } else {
+                    (dur * 1000.0) as u32
+                };
+                state.dispatch(AppAction::SetDuration(crate::domain::TimeMs(audio_dur_ms)));
                 state.dispatch(AppAction::Seek(state.playback.current_time_ms));
             }
         })
