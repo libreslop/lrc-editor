@@ -237,20 +237,10 @@ impl Reducible for AppState {
                         }
                         let entries = merged_entries;
                         
-                        let mut next_uid = new_state.document.next_uid;
-                        let mut new_doc = LrcDocument::new(entries, doc.metadata().to_vec(), doc.line_count());
-                        crate::domain::document::reconcile_identity(
-                            Some(doc),
-                            &mut new_doc,
-                            &mut next_uid,
-                        );
-                        
+                        let new_doc = LrcDocument::new(entries, doc.metadata().to_vec(), doc.line_count());
                         let text = new_doc.to_source_text();
-                        new_state.document.next_uid = next_uid;
-                        new_state.document.source_text = text.clone();
-                        new_state.view.selection.prune(&new_doc);
-                        new_state.document.document = Some(new_doc);
-                        new_state.document.parse_error = None;
+                        
+                        new_state.update_document(text.clone());
                         
                         new_state.history.history.truncate(new_state.history.history_index + 1);
                         new_state.history.history.push(text);

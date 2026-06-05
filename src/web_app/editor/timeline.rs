@@ -284,17 +284,23 @@ impl<'a> TimelineEditor<'a> {
             text.push_str(&format!("[{}:{}]\n", tag.key(), tag.value()));
         }
         
+        let mut first_non_empty_seen = false;
         for i in &merged {
             let trimmed = i.raw_text.trim_start();
             if trimmed.is_empty() {
-                text.push_str(&format!("[{}]\n", i.start.as_timestamp()));
+                if first_non_empty_seen {
+                    text.push_str(&format!("[{}]\n", i.start.as_timestamp()));
+                }
             } else {
+                first_non_empty_seen = true;
                 text.push_str(&format!("[{}] {}\n", i.start.as_timestamp(), trimmed));
             }
         }
         
         if let Some(last) = merged.last() {
-            text.push_str(&format!("[{}]\n", last.end.as_timestamp()));
+            if first_non_empty_seen {
+                text.push_str(&format!("[{}]\n", last.end.as_timestamp()));
+            }
         }
 
         text

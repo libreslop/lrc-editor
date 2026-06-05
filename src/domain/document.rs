@@ -113,11 +113,15 @@ impl LrcDocument {
         for tag in &self.metadata {
             text.push_str(&format!("[{}:{}]\n", tag.key(), tag.value()));
         }
+        let mut first_non_empty_seen = false;
         for entry in &self.entries {
             let trimmed = entry.text().trim_start();
             if trimmed.is_empty() {
-                text.push_str(&format!("[{}]\n", entry.time_ms().as_timestamp()));
+                if first_non_empty_seen {
+                    text.push_str(&format!("[{}]\n", entry.time_ms().as_timestamp()));
+                }
             } else {
+                first_non_empty_seen = true;
                 text.push_str(&format!("[{}] {}\n", entry.time_ms().as_timestamp(), trimmed));
             }
         }
