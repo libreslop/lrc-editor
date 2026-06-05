@@ -191,6 +191,9 @@ pub fn app() -> Html {
                             }
                         };
                         let mut edges = vec![0];
+                        if duration.as_u32() > 0 {
+                            edges.push(duration.as_u32());
+                        }
                         if let Some(doc) = &current_state.document.document {
                             for chunk in doc.timeline_chunks(duration) {
                                 if !chunk.is_empty() {
@@ -232,6 +235,9 @@ pub fn app() -> Html {
                             }
                         };
                         let mut edges = Vec::new();
+                        if duration.as_u32() > 0 {
+                            edges.push(duration.as_u32());
+                        }
                         if let Some(doc) = &current_state.document.document {
                             for chunk in doc.timeline_chunks(duration) {
                                 if !chunk.is_empty() {
