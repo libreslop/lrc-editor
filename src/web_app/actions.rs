@@ -304,9 +304,17 @@ impl Reducible for AppState {
                     
                     if let Some(new_doc) = &new_state.document.document {
                         let to_select = new_doc.entries().iter()
-                            .find(|e| e.uid() >= new_uid && e.display_text() == "*CHANGE ME*")
+                            .filter(|e| e.display_text() == "*CHANGE ME*")
+                            .min_by_key(|e| {
+                                (e.time_ms().as_u32() as i32 - start.as_u32() as i32).abs()
+                            })
                             .map(|e| e.uid())
-                            .unwrap_or(new_uid);
+                            .unwrap_or_else(|| {
+                                new_doc.entries().iter()
+                                    .find(|e| e.uid() >= new_uid)
+                                    .map(|e| e.uid())
+                                    .unwrap_or(new_uid)
+                            });
                         new_state.view.selection.select_entry(new_doc, to_select, SelectionMode::Replace);
                     }
                 }
