@@ -303,7 +303,11 @@ impl Reducible for AppState {
                     new_state.history.history_index = new_state.history.history.len() - 1;
                     
                     if let Some(new_doc) = &new_state.document.document {
-                        new_state.view.selection.select_entry(new_doc, new_uid, SelectionMode::Replace);
+                        let to_select = new_doc.entries().iter()
+                            .find(|e| e.uid() >= new_uid && e.display_text() == "*CHANGE ME*")
+                            .map(|e| e.uid())
+                            .unwrap_or(new_uid);
+                        new_state.view.selection.select_entry(new_doc, to_select, SelectionMode::Replace);
                     }
                 }
             }

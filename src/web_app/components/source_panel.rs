@@ -254,9 +254,26 @@ pub fn source_panel(props: &SourcePanelProps) -> Html {
                     if let Some(last_sel_id) = state.view.selection.last_selected_id() {
                         if let Some(doc) = &state.document.document {
                             if let Some(entry) = doc.entry_by_uid(last_sel_id) {
-                                let target_line_idx = entry.source_line.as_zero_based();
-                                if let Some(pos) = get_end_of_line_utf16(&state.document.source_text, target_line_idx) {
-                                    let _ = ta.set_selection_range(pos as u32, pos as u32);
+                                if entry.display_text() == "*CHANGE ME*" {
+                                    let leading_space_count = entry.text()
+                                        .chars()
+                                        .take_while(|c| c.is_whitespace())
+                                        .map(|c| c.len_utf16())
+                                        .sum::<usize>();
+                                    let trailing_space_count = entry.text()
+                                        .chars()
+                                        .rev()
+                                        .take_while(|c| c.is_whitespace())
+                                        .map(|c| c.len_utf16())
+                                        .sum::<usize>();
+                                    let start_pos = entry.lyric_start_utf16() + leading_space_count;
+                                    let end_pos = entry.lyric_end_utf16() - trailing_space_count;
+                                    let _ = ta.set_selection_range(start_pos as u32, end_pos as u32);
+                                } else {
+                                    let target_line_idx = entry.source_line.as_zero_based();
+                                    if let Some(pos) = get_end_of_line_utf16(&state.document.source_text, target_line_idx) {
+                                        let _ = ta.set_selection_range(pos as u32, pos as u32);
+                                    }
                                 }
                             }
                         }

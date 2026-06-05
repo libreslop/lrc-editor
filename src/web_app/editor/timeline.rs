@@ -70,7 +70,7 @@ impl<'a> TimelineEditor<'a> {
             color_index: 0,
             start,
             end,
-            raw_text: "Change me".to_string(),
+            raw_text: "*CHANGE ME*".to_string(),
             is_empty: false,
         };
         

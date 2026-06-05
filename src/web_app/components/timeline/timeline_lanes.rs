@@ -196,7 +196,7 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                                     class="lyric-chunk drag-create-chunk"
                                     style={format!("left: {}px; width: {}px;", start_px, width_px)}
                                 >
-                                    { "Change me" }
+                                    { "*CHANGE ME*" }
                                 </div>
                             }
                         } else if props.drag_create_start.is_none() && props.hover_lyrics_time.is_some() {
