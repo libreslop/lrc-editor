@@ -29,20 +29,26 @@ pub fn waveform_canvas(props: &WaveformCanvasProps) -> Html {
     let viewport_width = props.viewport_width;
 
     use_effect_with((summary, width, scroll_left, viewport_width), move |(summary, width, scroll_left, viewport_width)| {
-        if let Some(s) = summary {
-            if let Some(canvas) = canvas_ref.cast::<HtmlCanvasElement>() {
-                // Ensure canvas internal resolution matches display size
-                let display_width = width.as_f64();
-                let display_height = canvas.client_height() as f64;
-                
-                if canvas.width() as f64 != display_width {
-                    canvas.set_width(display_width as u32);
-                }
-                if canvas.height() as f64 != display_height {
-                    canvas.set_height(display_height as u32);
-                }
+        if let Some(canvas) = canvas_ref.cast::<HtmlCanvasElement>() {
+            // Ensure canvas internal resolution matches display size
+            let display_width = width.as_f64();
+            let display_height = canvas.client_height() as f64;
+            
+            if canvas.width() as f64 != display_width {
+                canvas.set_width(display_width as u32);
+            }
+            if canvas.height() as f64 != display_height {
+                canvas.set_height(display_height as u32);
+            }
 
+            if let Some(s) = summary {
                 draw_waveform_tiled(&canvas, s, *scroll_left, *viewport_width);
+            } else {
+                if let Ok(Some(ctx)) = canvas.get_context("2d") {
+                    if let Ok(ctx2d) = ctx.dyn_into::<web_sys::CanvasRenderingContext2d>() {
+                        ctx2d.clear_rect(0.0, 0.0, display_width, display_height);
+                    }
+                }
             }
         }
         || ()

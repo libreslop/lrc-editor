@@ -63,6 +63,7 @@ pub fn use_file_handlers(
                     state.dispatch(AppAction::SetAudioFilename(file.name()));
                     if let Ok(url) = Url::create_object_url_with_blob(&file) {
                         audio_url.set(Some(url.clone()));
+                        waveform_summary.set(None);
                         
                         load_waveform_from_url(url, waveform_summary.clone());
                         
