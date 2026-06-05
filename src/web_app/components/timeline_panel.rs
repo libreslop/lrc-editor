@@ -213,21 +213,19 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 
                 let mut local_current_f64 = start_time.as_u32() as f64;
                 let mut last_handled_seek = None;
-                let mut bypass_sync_frames = 0;
                 
                 let interval = gloo_timers::callback::Interval::new(16, move || {
                     let now = js_sys::Date::now();
                     let delta = now - last_time_ref.get();
                     last_time_ref.set(now);
                     
-                    local_current_f64 += delta;
-                    
                     let current_seek = *last_seek_ref.borrow();
+                    let mut seek_just_handled = false;
                     if current_seek != last_handled_seek {
                         last_handled_seek = current_seek;
                         if let Some(seek_time) = current_seek {
                             local_current_f64 = seek_time.as_u32() as f64;
-                            bypass_sync_frames = 20; // Skip sync for 20 ticks (~320ms) after seek to let browser catch up
+                            seek_just_handled = true;
                         }
                     }
                     
@@ -238,19 +236,30 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         } else {
                             (dur * 1000.0) as u32
                         };
-                        if local_current_f64 + 200.0 < audio_dur_ms as f64 && !audio.paused() && !audio.ended() {
-                            let audio_time_ms = audio.current_time() * 1000.0;
-                            if bypass_sync_frames > 0 {
-                                bypass_sync_frames -= 1;
-                            } else {
-                                if audio_time_ms > 0.0 || local_current_f64 < 500.0 {
-                                    local_current_f64 = audio_time_ms;
+                        
+                        if local_current_f64 < audio_dur_ms as f64 {
+                            if !audio.seeking() && audio.ready_state() >= 2 && !seek_just_handled { // HAVE_CURRENT_DATA
+                                let audio_time_ms = audio.current_time() * 1000.0;
+                                local_current_f64 = audio_time_ms;
+                                
+                                if audio.paused() && !audio.ended() {
+                                    let _ = audio.play();
                                 }
+                            } else {
+                                // While seeking or buffering, hold local_current_f64 at the target position.
+                                // This prevents the clock from drifting ahead of unbuffered media.
                             }
-                        } else if local_current_f64 < audio_dur_ms as f64 && audio.paused() && !audio.ended() {
-                            if local_current_f64 + 100.0 < audio_dur_ms as f64 {
-                                let _ = audio.play();
+                        } else {
+                            if !seek_just_handled {
+                                local_current_f64 += delta;
                             }
+                            if !audio.paused() {
+                                let _ = audio.pause();
+                            }
+                        }
+                    } else {
+                        if !seek_just_handled {
+                            local_current_f64 += delta;
                         }
                     }
                     
