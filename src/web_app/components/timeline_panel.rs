@@ -30,7 +30,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let viewport_width = use_state(|| 0.0);
 
     let drag_mode = use_state(|| None::<DragTarget>);
-    let suppress_panning = use_state(|| false);
+    let suppress_panning = use_mut_ref(|| false);
     let drag_start_x = use_mut_ref(|| 0.0);
     let drag_start_y = use_state(|| Pixels(0.0));
     let selection_rect = use_state(|| None::<crate::domain::Rect>);
@@ -41,6 +41,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let drag_scrollbar_handle_offset = use_mut_ref(|| 0.0);
     let is_scrollbar_dragged = use_mut_ref(|| false);
     let last_mouse_pos = use_mut_ref(|| crate::domain::Vec2 { x: 0.0, y: 0.0 });
+    let ignore_next_scroll = use_mut_ref(|| false);
 
     let hover_lyrics_time = use_state(|| None::<TimeMs>);
     let drag_create_start = use_state(|| None::<TimeMs>);
@@ -134,9 +135,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         let hit_right_border = playhead_x >= scroll_left + client_width - 1.0;
 
                         if hit_right_border || !is_in_safe_zone {
-                            suppress_panning.set(false);
+                            *suppress_panning.borrow_mut() = false;
                         } else if is_in_safe_zone {
-                            suppress_panning.set(true);
+                            *suppress_panning.borrow_mut() = true;
                         }
                     } else if mode.is_some() && actual_delta != 0 {
                         let px = px_per_second_ref.borrow().as_f64();
@@ -248,8 +249,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let px_per_second = px_per_second;
         let suppress_panning = suppress_panning.clone();
         let scroll_left_state = scroll_left.clone();
+        let ignore_next_scroll = ignore_next_scroll.clone();
         use_effect_with(last_seek, move |seek| {
             let suppress_panning = suppress_panning.clone();
+            let ignore_next_scroll = ignore_next_scroll.clone();
             if let Some(time_ms) = seek {
                 if let Some(audio) = audio_ref.cast::<HtmlAudioElement>() {
                     audio.set_current_time(time_ms.to_secs());
@@ -265,7 +268,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     let is_in_safe_zone = playhead_x < scroll_left + safe_zone || playhead_x > scroll_left + client_width - safe_zone;
                     let is_off_screen = playhead_x < scroll_left || playhead_x > scroll_left + client_width;
 
-                    if is_off_screen || (is_in_safe_zone && !*suppress_panning) {
+                    if is_off_screen || (is_in_safe_zone && !*suppress_panning.borrow()) {
+                        *ignore_next_scroll.borrow_mut() = true;
                         v.set_scroll_left((playhead_x - client_width / 2.0) as i32);
                         scroll_left_state.set(v.scroll_left() as f64);
                     }
@@ -303,9 +307,17 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let last_mouse_pos = last_mouse_pos.clone();
         let px_per_second = px_per_second;
         let state = props.state.clone();
+        let ignore_next_scroll = ignore_next_scroll.clone();
+        let suppress_panning = suppress_panning.clone();
 
         Callback::from(move |e: Event| {
             if let Some(viewport) = e.target_dyn_into::<web_sys::HtmlElement>() {
+                if *ignore_next_scroll.borrow() {
+                    *ignore_next_scroll.borrow_mut() = false;
+                } else {
+                    *suppress_panning.borrow_mut() = true;
+                }
+
                 if !*is_scrollbar_dragged.borrow() {
                     let new_scroll = viewport.scroll_left() as f64;
                     scroll_left.set(new_scroll);
@@ -645,6 +657,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let last_mouse_pos = last_mouse_pos.clone();
         let suppress_panning = suppress_panning.clone();
         let scroll_left_state = scroll_left.clone();
+        let ignore_next_scroll = ignore_next_scroll.clone();
         
         let current_time_ms_ref = current_time_ms_ref.clone();
         
@@ -670,9 +683,15 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let suppress_panning = suppress_panning.clone();
             let scroll_left_state = scroll_left_state.clone();
             let state = state.clone();
+            let ignore_next_scroll = ignore_next_scroll.clone();
+
+            let mut prev_world_x_opt = None::<f64>;
 
             if *playing || is_dragging {
-                *cb_clone.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+                *cb_clone.borrow_mut() = Some(Closure::wrap(Box::new({
+                    let ignore_next_scroll = ignore_next_scroll.clone();
+                    let suppress_panning = suppress_panning.clone();
+                    move || {
                     if let (Some(p), Some(v)) = (
                         playhead.cast::<web_sys::HtmlElement>(),
                         viewport.cast::<web_sys::HtmlElement>(),
@@ -715,11 +734,28 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             let is_in_safe_zone = world_x < scroll_left + safe_zone || world_x > scroll_left + client_width - safe_zone;
                             let is_off_screen = world_x < scroll_left || world_x > scroll_left + client_width;
 
-                            if !*suppress_panning || is_off_screen {
+                            let mut entered_safe_zone = false;
+                            if let Some(prev_world_x) = prev_world_x_opt {
+                                let prev_is_in_safe_zone = prev_world_x < scroll_left + safe_zone || prev_world_x > scroll_left + client_width - safe_zone;
+                                let prev_is_off_screen = prev_world_x < scroll_left || prev_world_x > scroll_left + client_width;
+                                if !prev_is_in_safe_zone && !prev_is_off_screen && is_in_safe_zone {
+                                    entered_safe_zone = true;
+                                }
+                            }
+                            prev_world_x_opt = Some(world_x);
+
+                            let mut should_pan = is_off_screen;
+                            if is_in_safe_zone && entered_safe_zone && !*suppress_panning.borrow() {
+                                should_pan = true;
+                            }
+
+                            if should_pan {
                                 if world_x > scroll_left + client_width - safe_zone {
+                                    *ignore_next_scroll.borrow_mut() = true;
                                     v.set_scroll_left((world_x - safe_zone) as i32);
                                     scroll_left_state.set(v.scroll_left() as f64);
                                 } else if world_x < scroll_left + safe_zone {
+                                    *ignore_next_scroll.borrow_mut() = true;
                                     v.set_scroll_left((world_x - client_width / 2.0) as i32);
                                     scroll_left_state.set(v.scroll_left() as f64);
                                 }
@@ -727,7 +763,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
                             let hit_right_border = world_x >= scroll_left + client_width - 1.0;
                             if hit_right_border || !is_in_safe_zone {
-                                suppress_panning.set(false);
+                                *suppress_panning.borrow_mut() = false;
                             }
                         }
 
@@ -746,7 +782,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             }
                         }
                     }
-                }) as Box<dyn FnMut()>));
+                }}) as Box<dyn FnMut()>));
                 
                 if let Some(window) = web_sys::window() {
                     if let Ok(id) = window.request_animation_frame(cb_clone.borrow().as_ref().unwrap().as_ref().unchecked_ref()) {
@@ -1107,7 +1143,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         }
                     }
                     DragTarget::Playhead => {
-                        suppress_panning.set(true);
+                        *suppress_panning.borrow_mut() = true;
                         let latest_time = *current_time_ms_ref.borrow();
                         state.dispatch(AppAction::Seek(latest_time));
                     }
