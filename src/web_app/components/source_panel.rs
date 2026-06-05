@@ -103,6 +103,21 @@ fn highlight_lrc(text: &str) -> Html {
     }
 }
 
+fn get_end_of_line_utf16(source_text: &str, target_line_idx: usize) -> Option<usize> {
+    let mut current_offset_utf16 = 0;
+    let lines: Vec<&str> = source_text.split('\n').collect();
+    if target_line_idx < lines.len() {
+        for idx in 0..=target_line_idx {
+            let line_len = lines[idx].encode_utf16().count();
+            if idx == target_line_idx {
+                return Some(current_offset_utf16 + line_len);
+            }
+            current_offset_utf16 += line_len + 1; // +1 for the '\n' character
+        }
+    }
+    None
+}
+
 #[derive(Properties, PartialEq)]
 pub struct SourcePanelProps {
     pub state: UseReducerHandle<AppState>,
@@ -114,6 +129,7 @@ pub struct SourcePanelProps {
 #[function_component(SourcePanel)]
 pub fn source_panel(props: &SourcePanelProps) -> Html {
     let state = props.state.clone();
+    let last_positioned_selection = use_state(|| Vec::<usize>::new());
     
     let oninput = {
         let state = state.clone();
@@ -177,9 +193,27 @@ pub fn source_panel(props: &SourcePanelProps) -> Html {
 
     let onmouseenter = {
         let textarea_ref = textarea_ref.clone();
+        let state = state.clone();
+        let last_positioned_selection = last_positioned_selection.clone();
         Callback::from(move |_| {
             if let Some(ta) = textarea_ref.cast::<HtmlTextAreaElement>() {
                 let _ = ta.focus();
+                
+                let current_selection = state.view.selection.selection_order().to_vec();
+                if current_selection != *last_positioned_selection {
+                    last_positioned_selection.set(current_selection);
+                    
+                    if let Some(last_sel_id) = state.view.selection.last_selected_id() {
+                        if let Some(doc) = &state.document.document {
+                            if let Some(entry) = doc.entry_by_uid(last_sel_id) {
+                                let target_line_idx = entry.source_line.as_zero_based();
+                                if let Some(pos) = get_end_of_line_utf16(&state.document.source_text, target_line_idx) {
+                                    let _ = ta.set_selection_range(pos as u32, pos as u32);
+                                }
+                            }
+                        }
+                    }
+                }
             }
         })
     };

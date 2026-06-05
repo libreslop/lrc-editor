@@ -19,12 +19,23 @@ pub enum SelectionMode {
 pub struct SelectionState {
     selected_ids: Vec<usize>,
     anchor_id: Option<usize>,
+    selection_order: Vec<usize>,
 }
 
 impl SelectionState {
     /// Current selected ids.
     pub fn selected_ids(&self) -> &[usize] {
         &self.selected_ids
+    }
+
+    /// Selection order (chronological).
+    pub fn selection_order(&self) -> &[usize] {
+        &self.selection_order
+    }
+
+    /// The id of the most recently selected chunk, if any.
+    pub fn last_selected_id(&self) -> Option<usize> {
+        self.selection_order.last().copied()
     }
 
     /// Anchor used for range selection.
@@ -40,6 +51,8 @@ impl SelectionState {
     /// Keep only selections that still exist in the document.
     pub fn prune(&mut self, document: &LrcDocument) {
         self.selected_ids
+            .retain(|id| document.entry_by_uid(*id).is_some());
+        self.selection_order
             .retain(|id| document.entry_by_uid(*id).is_some());
 
         if self
@@ -57,10 +70,12 @@ impl SelectionState {
         }
 
         self.selected_ids.clear();
+        self.selection_order.clear();
 
         if let Some(entry) = entry.filter(|entry| !entry.is_empty()) {
             self.selected_ids.push(entry.uid());
             self.anchor_id = Some(entry.uid());
+            self.selection_order.push(entry.uid());
         }
     }
 
@@ -73,6 +88,7 @@ impl SelectionState {
             .map(LyricEntry::uid)
             .collect();
         self.anchor_id = self.selected_ids.first().copied();
+        self.selection_order = self.selected_ids.clone();
     }
 
     /// Apply a click selection transition.
@@ -84,17 +100,23 @@ impl SelectionState {
         match mode {
             SelectionMode::Replace => {
                 self.selected_ids.clear();
+                self.selection_order.clear();
                 if !entry.is_empty() {
                     self.selected_ids.push(entry_id);
+                    self.selection_order.push(entry_id);
                 }
                 self.anchor_id = Some(entry_id);
             }
             SelectionMode::Toggle => {
                 if let Some(index) = self.selected_ids.iter().position(|id| *id == entry_id) {
                     self.selected_ids.remove(index);
+                    if let Some(pos) = self.selection_order.iter().position(|id| *id == entry_id) {
+                        self.selection_order.remove(pos);
+                    }
                 } else if !entry.is_empty() {
                     self.selected_ids.push(entry_id);
                     self.selected_ids.sort_unstable();
+                    self.selection_order.push(entry_id);
                 }
                 self.anchor_id = Some(entry_id);
             }
@@ -113,12 +135,19 @@ impl SelectionState {
                         .filter(|e| !e.is_empty())
                         .map(|e| e.uid())
                         .collect();
+                    self.selection_order = self.selected_ids.clone();
+                    // Place the clicked entry at the end of the order to mark it as the most recently selected
+                    if let Some(pos) = self.selection_order.iter().position(|id| *id == entry_id) {
+                        self.selection_order.remove(pos);
+                        self.selection_order.push(entry_id);
+                    }
                 }
             }
             SelectionMode::Add => {
                 if !self.selected_ids.contains(&entry_id) && !entry.is_empty() {
                     self.selected_ids.push(entry_id);
                     self.selected_ids.sort_unstable();
+                    self.selection_order.push(entry_id);
                 }
                 self.anchor_id = Some(entry_id);
             }
