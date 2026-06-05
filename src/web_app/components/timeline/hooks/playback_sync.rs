@@ -159,15 +159,9 @@ pub fn use_playback_sync(
                         }
 
                         if should_pan {
-                            if world_x > scroll_left + client_width - safe_zone {
-                                *ignore_next_scroll.borrow_mut() = true;
-                                v.set_scroll_left((world_x - safe_zone) as i32);
-                                scroll_left_state.set(v.scroll_left() as f64);
-                            } else if world_x < scroll_left + safe_zone {
-                                *ignore_next_scroll.borrow_mut() = true;
-                                v.set_scroll_left((world_x - client_width / 2.0) as i32);
-                                scroll_left_state.set(v.scroll_left() as f64);
-                            }
+                            *ignore_next_scroll.borrow_mut() = true;
+                            v.set_scroll_left((world_x - client_width / 2.0) as i32);
+                            scroll_left_state.set(v.scroll_left() as f64);
                         }
 
                         let hit_right_border = world_x >= scroll_left + client_width - 1.0;
