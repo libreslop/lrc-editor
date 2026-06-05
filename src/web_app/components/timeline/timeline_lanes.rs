@@ -76,6 +76,17 @@ pub fn timeline_lanes(props: &TimelineLanesProps) -> Html {
                                     { "Import audio" }
                                 </div>
                             }
+                        } else if props.waveform_summary.is_none() {
+                            let loading_style = format!(
+                                "left: {}px; width: {}px;",
+                                props.scroll_left + 10.0,
+                                props.viewport_width - 20.0
+                            );
+                            html! {
+                                <div class="audio-loading-text" style={loading_style}>
+                                    { "Loading audio..." }
+                                </div>
+                            }
                         } else {
                             html! {}
                         }
