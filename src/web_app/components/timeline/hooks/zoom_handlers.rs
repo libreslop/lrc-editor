@@ -22,8 +22,12 @@ pub fn use_zoom_handlers(
         let viewport_width = viewport_width.clone();
         Callback::from(move |_| {
             let zoom = state.view.zoom_level.as_f64();
-            let current_time_ms = state.playback.current_time_ms;
-            let vp_width = *viewport_width;
+            let vp_width = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                let w = vp.client_width() as f64;
+                if w > 0.0 { w } else { *viewport_width }
+            } else {
+                *viewport_width
+            };
             let dur_secs = state.max_timeline_duration().to_secs();
             let min_zoom = if vp_width > 0.0 && dur_secs > 0.0 {
                 vp_width / (dur_secs * 92.0)
@@ -33,15 +37,16 @@ pub fn use_zoom_handlers(
             let old_px_per_second = 92.0 * zoom;
             let new_zoom = (zoom * 1.25).clamp(min_zoom, 10.0);
             let new_px_per_second = 92.0 * new_zoom;
-            let playhead_x_old = current_time_ms.to_secs() * old_px_per_second;
-            let playhead_x_new = current_time_ms.to_secs() * new_px_per_second;
-            
-            let screen_x = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                playhead_x_old - vp.scroll_left() as f64
+
+            let scroll_left_old = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                vp.scroll_left() as f64
             } else {
-                0.0
+                *scroll_left_state
             };
-            let new_scroll = playhead_x_new - screen_x;
+
+            let center_x_old = scroll_left_old + vp_width / 2.0;
+            let center_x_new = center_x_old * (new_px_per_second / old_px_per_second);
+            let new_scroll = center_x_new - vp_width / 2.0;
 
             state.dispatch(AppAction::SetZoom(ZoomLevel(new_zoom)));
             
@@ -64,8 +69,12 @@ pub fn use_zoom_handlers(
         let viewport_width = viewport_width.clone();
         Callback::from(move |_| {
             let zoom = state.view.zoom_level.as_f64();
-            let current_time_ms = state.playback.current_time_ms;
-            let vp_width = *viewport_width;
+            let vp_width = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                let w = vp.client_width() as f64;
+                if w > 0.0 { w } else { *viewport_width }
+            } else {
+                *viewport_width
+            };
             let dur_secs = state.max_timeline_duration().to_secs();
             let min_zoom = if vp_width > 0.0 && dur_secs > 0.0 {
                 vp_width / (dur_secs * 92.0)
@@ -75,15 +84,16 @@ pub fn use_zoom_handlers(
             let old_px_per_second = 92.0 * zoom;
             let new_zoom = (zoom / 1.25).clamp(min_zoom, 10.0);
             let new_px_per_second = 92.0 * new_zoom;
-            let playhead_x_old = current_time_ms.to_secs() * old_px_per_second;
-            let playhead_x_new = current_time_ms.to_secs() * new_px_per_second;
-            
-            let screen_x = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                playhead_x_old - vp.scroll_left() as f64
+
+            let scroll_left_old = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
+                vp.scroll_left() as f64
             } else {
-                0.0
+                *scroll_left_state
             };
-            let new_scroll = playhead_x_new - screen_x;
+
+            let center_x_old = scroll_left_old + vp_width / 2.0;
+            let center_x_new = center_x_old * (new_px_per_second / old_px_per_second);
+            let new_scroll = center_x_new - vp_width / 2.0;
 
             state.dispatch(AppAction::SetZoom(ZoomLevel(new_zoom)));
             
