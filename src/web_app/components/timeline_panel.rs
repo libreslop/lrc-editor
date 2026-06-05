@@ -194,6 +194,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 if let Some(audio) = audio_ref.cast::<web_sys::HtmlAudioElement>() {
                     let audio_dur_ms = (audio.duration() * 1000.0) as u32;
                     if start_time.as_u32() < audio_dur_ms {
+                        audio.set_current_time(start_time.to_secs());
                         let _ = audio.play();
                     } else {
                         let _ = audio.pause();
