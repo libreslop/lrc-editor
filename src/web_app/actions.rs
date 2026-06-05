@@ -195,11 +195,29 @@ impl Reducible for AppState {
             }
             AppAction::SetTime(time) => {
                 let max_dur = new_state.max_timeline_duration();
-                new_state.playback.current_time_ms = if time.as_u32() > max_dur.as_u32() {
+                let bounded_time = if time.as_u32() > max_dur.as_u32() {
                     max_dur
                 } else {
                     time
                 };
+
+                if !new_state.playback.playing {
+                    new_state.playback.last_seek_request = None;
+                    new_state.playback.current_time_ms = bounded_time;
+                } else {
+                    if let Some(seek_time) = new_state.playback.last_seek_request {
+                        if bounded_time == seek_time {
+                            new_state.playback.last_seek_request = None;
+                            new_state.playback.current_time_ms = bounded_time;
+                        } else {
+                            // Ignore stale updates from active playback interval ticks
+                            // while we have a pending seek request.
+                            return self;
+                        }
+                    } else {
+                        new_state.playback.current_time_ms = bounded_time;
+                    }
+                }
             }
             AppAction::SetDuration(time) => {
                 new_state.playback.duration_ms = time;
@@ -210,6 +228,7 @@ impl Reducible for AppState {
             }
             AppAction::TogglePlay => {
                 new_state.playback.playing = !new_state.playback.playing;
+                new_state.playback.last_seek_request = None;
             }
             AppAction::Seek(time) => {
                 let max_dur = new_state.max_timeline_duration();

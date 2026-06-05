@@ -103,17 +103,27 @@ pub fn app() -> Html {
         );
     }
 
+    #[derive(Clone, Copy)]
+    struct LastSeekMemory {
+        target_time: TimeMs,
+        timestamp_ms: f64,
+    }
+
+    let last_seek_memory = yew::use_mut_ref(|| Option::<LastSeekMemory>::None);
+
     let state_ref = yew::use_mut_ref(|| state.clone());
     *state_ref.borrow_mut() = state.clone();
 
     {
         let state_ref = state_ref.clone();
         let show_help = show_help.clone();
+        let last_seek_memory = last_seek_memory.clone();
         use_effect_with(show_help.clone(), move |show_help_val| {
             let is_help_open = **show_help_val;
             let window = web_sys::window().unwrap();
             let state_ref = state_ref.clone();
             let show_help = show_help.clone();
+            let last_seek_memory = last_seek_memory.clone();
             
             let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
                 if is_help_open && e.key() == "Escape" {
@@ -166,9 +176,21 @@ pub fn app() -> Html {
                     }
                     "ArrowLeft" | "Left" => {
                         e.prevent_default();
-                        let current = current_state.playback.current_time_ms.as_u32();
                         let duration = current_state.playback.duration_ms;
-                        let mut edges = vec![0, duration.as_u32()];
+                        let now = js_sys::Date::now();
+                        let current = {
+                            let mem = last_seek_memory.borrow();
+                            if let Some(m) = &*mem {
+                                if now - m.timestamp_ms < 500.0 {
+                                    m.target_time.as_u32()
+                                } else {
+                                    current_state.playback.current_time_ms.as_u32()
+                                }
+                            } else {
+                                current_state.playback.current_time_ms.as_u32()
+                            }
+                        };
+                        let mut edges = vec![0];
                         if let Some(doc) = &current_state.document.document {
                             for chunk in doc.timeline_chunks(duration) {
                                 if !chunk.is_empty() {
@@ -180,18 +202,36 @@ pub fn app() -> Html {
                         edges.sort_unstable();
                         edges.dedup();
                         
-                        let target_u32 = edges.iter()
+                        let target_opt = edges.iter()
                             .copied()
                             .rev()
-                            .find(|&e| e < current)
-                            .unwrap_or(0);
-                        current_state.dispatch(AppAction::Seek(TimeMs(target_u32)));
+                            .find(|&e| e < current);
+                        
+                        if let Some(target_u32) = target_opt {
+                            *last_seek_memory.borrow_mut() = Some(LastSeekMemory {
+                                target_time: TimeMs(target_u32),
+                                timestamp_ms: now,
+                            });
+                            current_state.dispatch(AppAction::Seek(TimeMs(target_u32)));
+                        }
                     }
                     "ArrowRight" | "Right" => {
                         e.prevent_default();
-                        let current = current_state.playback.current_time_ms.as_u32();
                         let duration = current_state.playback.duration_ms;
-                        let mut edges = vec![0, duration.as_u32()];
+                        let now = js_sys::Date::now();
+                        let current = {
+                            let mem = last_seek_memory.borrow();
+                            if let Some(m) = &*mem {
+                                if now - m.timestamp_ms < 500.0 {
+                                    m.target_time.as_u32()
+                                } else {
+                                    current_state.playback.current_time_ms.as_u32()
+                                }
+                            } else {
+                                current_state.playback.current_time_ms.as_u32()
+                            }
+                        };
+                        let mut edges = Vec::new();
                         if let Some(doc) = &current_state.document.document {
                             for chunk in doc.timeline_chunks(duration) {
                                 if !chunk.is_empty() {
@@ -203,11 +243,17 @@ pub fn app() -> Html {
                         edges.sort_unstable();
                         edges.dedup();
                         
-                        let target_u32 = edges.iter()
+                        let target_opt = edges.iter()
                             .copied()
-                            .find(|&e| e > current)
-                            .unwrap_or_else(|| duration.as_u32());
-                        current_state.dispatch(AppAction::Seek(TimeMs(target_u32)));
+                            .find(|&e| e > current);
+                        
+                        if let Some(target_u32) = target_opt {
+                            *last_seek_memory.borrow_mut() = Some(LastSeekMemory {
+                                target_time: TimeMs(target_u32),
+                                timestamp_ms: now,
+                            });
+                            current_state.dispatch(AppAction::Seek(TimeMs(target_u32)));
+                        }
                     }
                     _ => {}
                 }
