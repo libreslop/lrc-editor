@@ -5,6 +5,8 @@ use crate::web_app::actions::AppState;
 pub struct PlaybackControlsProps {
     pub state: UseReducerHandle<AppState>,
     pub timecode_ref: NodeRef,
+    pub scrollbar_track_ref: NodeRef,
+    pub scrollbar_handle_ref: NodeRef,
     pub on_toggle_play: Callback<MouseEvent>,
     pub on_zoom_in: Callback<MouseEvent>,
     pub on_zoom_out: Callback<MouseEvent>,
@@ -60,9 +62,9 @@ pub fn playback_controls(props: &PlaybackControlsProps) -> Html {
                 }
             </button>
             
-            <div class="custom-scrollbar-track" onmousedown={props.on_scrollbar_mousedown.clone()}>
+            <div class="custom-scrollbar-track" ref={props.scrollbar_track_ref.clone()} onmousedown={props.on_scrollbar_mousedown.clone()}>
                 <div class="custom-scrollbar-playhead-marker" style={playhead_style}></div>
-                <div class="custom-scrollbar-handle" style={scroll_handle_style}></div>
+                <div class="custom-scrollbar-handle" ref={props.scrollbar_handle_ref.clone()} style={scroll_handle_style}></div>
             </div>
 
             <div class="zoom-controls">
