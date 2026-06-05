@@ -55,6 +55,24 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         lrc_input_ref.clone(),
     );
 
+    // Load cached audio from IndexedDB on mount
+    {
+        let state = props.state.clone();
+        let audio_url = audio_url.clone();
+        let waveform_summary = waveform_summary.clone();
+        use_effect_with((), move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(saved) = crate::web_app::indexed_db::load_audio_file().await {
+                    state.dispatch(AppAction::SetAudioFilename(saved.name));
+                    if let Ok(url) = web_sys::Url::create_object_url_with_blob(&saved.blob) {
+                        audio_url.set(Some(url.clone()));
+                        crate::web_app::components::timeline::hooks::file_handlers::load_waveform_from_url(url, waveform_summary);
+                    }
+                }
+            });
+        });
+    }
+
     let on_file_change = file_handlers.on_file_change;
     let import_click = file_handlers.import_click;
     let import_lrc_click = file_handlers.import_lrc_click;

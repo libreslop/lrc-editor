@@ -16,6 +16,34 @@ pub struct FileHandlers {
     pub on_loaded_metadata: Callback<Event>,
 }
 
+pub fn load_waveform_from_url(
+    url: String,
+    waveform_summary: UseStateHandle<Option<Rc<WaveformSummary>>>,
+) {
+    spawn_local(async move {
+        // Fetch as array buffer and decode
+        let opts = RequestInit::new();
+        opts.set_method("GET");
+        opts.set_mode(RequestMode::Cors);
+        if let Ok(request) = Request::new_with_str_and_init(&url, &opts) {
+            let window = web_sys::window().unwrap();
+            if let Ok(resp_value) = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&request)).await {
+                let resp: Response = resp_value.dyn_into().unwrap();
+                if let Ok(array_buffer) = wasm_bindgen_futures::JsFuture::from(resp.array_buffer().unwrap()).await {
+                    if let Ok(audio_ctx) = AudioContext::new() {
+                        if let Ok(audio_buffer_promise) = audio_ctx.decode_audio_data(&array_buffer.into()) {
+                            if let Ok(audio_buffer_value) = wasm_bindgen_futures::JsFuture::from(audio_buffer_promise).await {
+                                let audio_buffer: web_sys::AudioBuffer = audio_buffer_value.dyn_into().unwrap();
+                                waveform_summary.set(Some(Rc::new(crate::web_app::components::timeline_panel::downsample_audio(audio_buffer))));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
 #[hook]
 pub fn use_file_handlers(
     state: UseReducerHandle<AppState>,
@@ -36,28 +64,13 @@ pub fn use_file_handlers(
                     if let Ok(url) = Url::create_object_url_with_blob(&file) {
                         audio_url.set(Some(url.clone()));
                         
-                        let waveform_summary = waveform_summary.clone();
+                        load_waveform_from_url(url, waveform_summary.clone());
+                        
+                        // Cache audio in IndexedDB
+                        let file_to_save = file.clone();
                         spawn_local(async move {
-                            // Fetch as array buffer and decode
-                            let opts = RequestInit::new();
-                            opts.set_method("GET");
-                            opts.set_mode(RequestMode::Cors);
-                            if let Ok(request) = Request::new_with_str_and_init(&url, &opts) {
-                                let window = web_sys::window().unwrap();
-                                if let Ok(resp_value) = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&request)).await {
-                                    let resp: Response = resp_value.dyn_into().unwrap();
-                                    if let Ok(array_buffer) = wasm_bindgen_futures::JsFuture::from(resp.array_buffer().unwrap()).await {
-                                        if let Ok(audio_ctx) = AudioContext::new() {
-                                            if let Ok(audio_buffer_promise) = audio_ctx.decode_audio_data(&array_buffer.into()) {
-                                                if let Ok(audio_buffer_value) = wasm_bindgen_futures::JsFuture::from(audio_buffer_promise).await {
-                                                    let audio_buffer: web_sys::AudioBuffer = audio_buffer_value.dyn_into().unwrap();
-                                                    waveform_summary.set(Some(Rc::new(crate::web_app::components::timeline_panel::downsample_audio(audio_buffer))));
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            let name = file_to_save.name();
+                            let _ = crate::web_app::indexed_db::store_audio_file(name, &file_to_save).await;
                         });
                     }
                 }
