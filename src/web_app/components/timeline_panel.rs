@@ -45,6 +45,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let is_scrollbar_dragged = use_mut_ref(|| false);
     let last_mouse_pos = use_mut_ref(|| crate::domain::Vec2 { x: 0.0, y: 0.0 });
     let ignore_next_scroll = use_mut_ref(|| false);
+    let last_user_input_time = use_mut_ref(|| 0.0);
 
     let hover_lyrics_time = use_state(|| None::<TimeMs>);
     let drag_create_start = use_state(|| None::<TimeMs>);
@@ -324,6 +325,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let state = props.state.clone();
         let ignore_next_scroll = ignore_next_scroll.clone();
         let suppress_panning = suppress_panning.clone();
+        let last_user_input_time = last_user_input_time.clone();
 
         Callback::from(move |e: Event| {
             if let Some(viewport) = e.target_dyn_into::<web_sys::HtmlElement>() {
@@ -331,6 +333,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     *ignore_next_scroll.borrow_mut() = false;
                 } else {
                     *suppress_panning.borrow_mut() = true;
+                    *last_user_input_time.borrow_mut() = js_sys::Date::now();
                 }
 
                 if !*is_scrollbar_dragged.borrow() {
@@ -371,7 +374,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let viewport_ref = viewport_ref.clone();
         let scroll_left_state = scroll_left.clone();
         let px_per_second_val = 92.0 * props.state.view.zoom_level.as_f64();
+        let last_user_input_time = last_user_input_time.clone();
         Callback::from(move |e: WheelEvent| {
+            *last_user_input_time.borrow_mut() = js_sys::Date::now();
             if e.ctrl_key() || e.meta_key() {
                 e.prevent_default();
                 if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
@@ -414,7 +419,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let scroll_left = scroll_left.clone();
         let viewport_width = viewport_width.clone();
         let viewport_scroll_width = viewport_scroll_width.clone();
+        let last_user_input_time = last_user_input_time.clone();
         std::rc::Rc::new(move |vp: &web_sys::HtmlElement, track: &web_sys::HtmlElement, handle: &web_sys::HtmlElement, client_x: f64, handle_offset: f64| {
+            *last_user_input_time.borrow_mut() = js_sys::Date::now();
             let track_rect = track.get_bounding_client_rect();
             let track_left = track_rect.left();
             let track_width = track_rect.width();
@@ -550,8 +557,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     // Global keyboard shortcuts (Delete/Backspace to delete, Esc to deselect)
     {
         let state = props.state.clone();
+        let last_user_input_time = last_user_input_time.clone();
         use_effect_with((), move |_| {
             let state_clone = state.clone();
+            let last_user_input_time = last_user_input_time.clone();
             let listener = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
                 // Ignore if currently typing in an input, textarea, or contenteditable element
                 let document = web_sys::window().unwrap().document().unwrap();
@@ -561,6 +570,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                         return;
                     }
                 }
+
+                *last_user_input_time.borrow_mut() = js_sys::Date::now();
 
                 let key = e.key();
                 if key == "Delete" || key == "Backspace" {
@@ -628,6 +639,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         viewport_ref.clone(),
         scroll_left.clone(),
         viewport_width.clone(),
+        last_user_input_time.clone(),
     );
     let zoom_in = zoom_handlers.zoom_in;
     let zoom_out = zoom_handlers.zoom_out;
@@ -646,6 +658,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         ignore_next_scroll.clone(),
         current_time_ms_ref.clone(),
         px_per_second_ref.clone(),
+        last_user_input_time.clone(),
     );
 
     let on_timeline_mousedown = {
@@ -655,8 +668,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let state = props.state.clone();
         let viewport_ref = viewport_ref.clone();
         let last_mouse_pos = last_mouse_pos.clone();
+        let last_user_input_time = last_user_input_time.clone();
         
         Callback::from(move |e: MouseEvent| {
+            *last_user_input_time.borrow_mut() = js_sys::Date::now();
             if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let _ = viewport.focus();
                 
@@ -675,7 +690,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             }
         })
     };
-
+ 
     let on_ruler_mousedown = {
         let drag_mode = drag_mode.clone();
         let drag_start_x = drag_start_x.clone();
@@ -683,8 +698,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let viewport_ref = viewport_ref.clone();
         let px_per_second = px_per_second;
         let last_mouse_pos = last_mouse_pos.clone();
+        let last_user_input_time = last_user_input_time.clone();
         
         Callback::from(move |e: MouseEvent| {
+            *last_user_input_time.borrow_mut() = js_sys::Date::now();
             e.stop_propagation();
             drag_mode.set(Some(DragTarget::Playhead));
             *drag_start_x.borrow_mut() = e.client_x() as f64;
@@ -698,16 +715,18 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             }
         })
     };
-
+ 
     let on_keydown = {
         let state = props.state.clone();
+        let last_user_input_time = last_user_input_time.clone();
         Callback::from(move |e: KeyboardEvent| {
+            *last_user_input_time.borrow_mut() = js_sys::Date::now();
             if e.key() == "Delete" || e.key() == "Backspace" {
                 state.dispatch(AppAction::DeleteSelected);
             }
         })
     };
-
+ 
     let on_mousedown_lyrics = {
         let drag_mode = drag_mode.clone();
         let drag_create_start = drag_create_start.clone();
@@ -715,8 +734,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let viewport_ref = viewport_ref.clone();
         let px_per_second = px_per_second;
         let state = props.state.clone();
+        let last_user_input_time = last_user_input_time.clone();
         
         Callback::from(move |e: MouseEvent| {
+            *last_user_input_time.borrow_mut() = js_sys::Date::now();
             e.stop_propagation();
             if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let _ = viewport.focus();
@@ -788,6 +809,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let last_mouse_pos = last_mouse_pos.clone();
         let state = props.state.clone();
         let drag_create_current = drag_create_current.clone();
+        let last_user_input_time = last_user_input_time.clone();
 
         let drag_scrollbar_handle_offset = drag_scrollbar_handle_offset.clone();
         let update_scrollbar = update_scrollbar.clone();
@@ -798,6 +820,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             *last_mouse_pos.borrow_mut() = crate::domain::Vec2 { x: e.client_x() as f64, y: e.client_y() as f64 };
             
             if let Some(mode) = *drag_mode {
+                *last_user_input_time.borrow_mut() = js_sys::Date::now();
                 let delta_x = e.client_x() as f64 - *drag_start_x.borrow();
                 
                 if mode == DragTarget::Playhead {
@@ -874,8 +897,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let drag_create_current = drag_create_current.clone();
         let hover_lyrics_time = hover_lyrics_time.clone();
         let px_per_second_ref = px_per_second_ref.clone();
+        let last_user_input_time = last_user_input_time.clone();
         
         Callback::from(move |e: MouseEvent| {
+            *last_user_input_time.borrow_mut() = js_sys::Date::now();
             let is_dragged = *is_scrollbar_dragged.borrow();
             if is_dragged {
                 let is_scrollbar_dragged_clone = is_scrollbar_dragged.clone();
@@ -1048,7 +1073,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let drag_start_x = drag_start_x.clone();
         let drag_target_uid = drag_target_uid.clone();
         let viewport_ref = viewport_ref.clone();
+        let last_user_input_time = last_user_input_time.clone();
         Callback::from(move |(uid, e, target): (usize, MouseEvent, DragTarget)| {
+            *last_user_input_time.borrow_mut() = js_sys::Date::now();
             if let Some(viewport) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let _ = viewport.focus();
             }

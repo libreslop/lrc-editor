@@ -22,6 +22,7 @@ pub fn use_playback_sync(
     ignore_next_scroll: Rc<RefCell<bool>>,
     current_time_ms_ref: Rc<RefCell<TimeMs>>,
     px_per_second_ref: Rc<RefCell<Pixels>>,
+    last_user_input_time: Rc<RefCell<f64>>,
 ) {
     let playing = state.playback.playing;
     let dragging_playhead = *drag_mode == Some(DragTarget::Playhead);
@@ -42,6 +43,7 @@ pub fn use_playback_sync(
         let scroll_left_state = scroll_left_state.clone();
         let state = state.clone();
         let ignore_next_scroll = ignore_next_scroll.clone();
+        let last_user_input_time = last_user_input_time.clone();
 
         let mut prev_world_x_opt = None::<f64>;
 
@@ -49,6 +51,7 @@ pub fn use_playback_sync(
             *cb_clone.borrow_mut() = Some(Closure::wrap(Box::new({
                 let ignore_next_scroll = ignore_next_scroll.clone();
                 let suppress_panning = suppress_panning.clone();
+                let last_user_input_time = last_user_input_time.clone();
                 move || {
                 if let (Some(p), Some(v)) = (
                     playhead.cast::<web_sys::HtmlElement>(),
@@ -159,9 +162,12 @@ pub fn use_playback_sync(
                         }
 
                         if should_pan {
-                            *ignore_next_scroll.borrow_mut() = true;
-                            v.set_scroll_left((world_x - client_width / 2.0) as i32);
-                            scroll_left_state.set(v.scroll_left() as f64);
+                            let elapsed_since_input = js_sys::Date::now() - *last_user_input_time.borrow();
+                            if elapsed_since_input >= 3000.0 {
+                                *ignore_next_scroll.borrow_mut() = true;
+                                v.set_scroll_left((world_x - client_width / 2.0) as i32);
+                                scroll_left_state.set(v.scroll_left() as f64);
+                            }
                         }
 
                         let hit_right_border = world_x >= scroll_left + client_width - 1.0;

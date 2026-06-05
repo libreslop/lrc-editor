@@ -13,13 +13,16 @@ pub fn use_zoom_handlers(
     viewport_ref: NodeRef,
     scroll_left: UseStateHandle<f64>,
     viewport_width: UseStateHandle<f64>,
+    last_user_input_time: std::rc::Rc<std::cell::RefCell<f64>>,
 ) -> ZoomHandlers {
     let zoom_in = {
         let state = state.clone();
         let viewport_ref = viewport_ref.clone();
         let scroll_left_state = scroll_left.clone();
         let viewport_width = viewport_width.clone();
+        let last_user_input_time = last_user_input_time.clone();
         Callback::from(move |_| {
+            *last_user_input_time.borrow_mut() = js_sys::Date::now();
             let zoom = state.view.zoom_level.as_f64();
             let vp_width = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let w = vp.client_width() as f64;
@@ -62,7 +65,9 @@ pub fn use_zoom_handlers(
         let viewport_ref = viewport_ref.clone();
         let scroll_left_state = scroll_left.clone();
         let viewport_width = viewport_width.clone();
+        let last_user_input_time = last_user_input_time.clone();
         Callback::from(move |_| {
+            *last_user_input_time.borrow_mut() = js_sys::Date::now();
             let zoom = state.view.zoom_level.as_f64();
             let vp_width = if let Some(vp) = viewport_ref.cast::<web_sys::HtmlElement>() {
                 let w = vp.client_width() as f64;
