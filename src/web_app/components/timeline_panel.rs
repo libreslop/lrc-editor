@@ -83,7 +83,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let export_lrc = file_handlers.export_lrc;
     let on_loaded_metadata = file_handlers.on_loaded_metadata;
 
-    let pan_velocity = use_mut_ref(|| 0.0);
+
     
     let current_time_ms_ref = use_mut_ref(|| props.state.playback.current_time_ms);
     *current_time_ms_ref.borrow_mut() = props.state.playback.current_time_ms;
@@ -97,70 +97,20 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     // Drag & Pan loop
     {
-        let pan_velocity = pan_velocity.clone();
         let viewport_ref = viewport_ref.clone();
         let px_per_second_ref = px_per_second_ref.clone();
         let drag_mode = drag_mode.clone();
-        let state = props.state.clone();
         let drag_offset_ms = drag_offset_ms.clone();
-        let last_mouse_pos = last_mouse_pos.clone();
-        let current_time_ms_ref = current_time_ms_ref.clone();
-        let suppress_panning = suppress_panning.clone();
-        let scroll_left_state = scroll_left.clone();
 
         use_effect(move || {
-            let suppress_panning = suppress_panning.clone();
             let interval = gloo_timers::callback::Interval::new(16, move || {
-                let vel = *pan_velocity.borrow();
                 let mode = *drag_mode;
                 
                 if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
                     let old_scroll = v.scroll_left();
-                    if vel != 0.0 && mode.is_some() {
-                        v.set_scroll_left(old_scroll + vel as i32);
-                        scroll_left_state.set(v.scroll_left() as f64);
-                    }
                     let actual_delta = v.scroll_left() - old_scroll;
                     
-                    if mode == Some(DragTarget::Playhead) {
-                        let rect = v.get_bounding_client_rect();
-                        let mouse_x = last_mouse_pos.borrow().x;
-                        let absolute_x = mouse_x - rect.left() + v.scroll_left() as f64;
-                        let px = px_per_second_ref.borrow().as_f64();
-                        let duration_ms = state.max_timeline_duration();
-                        let width_px_val = duration_ms.to_secs() * px;
-
-                        let min_x = (v.scroll_left() as f64).max(0.0);
-                        let max_x = (v.scroll_left() as f64 + v.client_width() as f64).min(width_px_val);
-                        let clamped_x = absolute_x.clamp(min_x, max_x);
-
-                        let target_time_ms = (clamped_x / px * 1000.0) as i32;
-                        let new_time = TimeMs(target_time_ms.max(0) as u32);
-                        
-                        let snapped_time = crate::web_app::editor::timeline::TimelineSnapper::snap_playhead(
-                            &state,
-                            new_time,
-                            duration_ms,
-                            *px_per_second_ref.borrow(),
-                        );
-                        
-                        *current_time_ms_ref.borrow_mut() = snapped_time;
-                        state.dispatch(AppAction::SetTime(snapped_time));
-
-                        let playhead_x = clamped_x;
-                        let scroll_left = v.scroll_left() as f64;
-                        let client_width = v.client_width() as f64;
-                        let safe_zone = 90.0;
-
-                        let is_in_safe_zone = playhead_x < scroll_left + safe_zone || playhead_x > scroll_left + client_width - safe_zone;
-                        let hit_right_border = playhead_x >= scroll_left + client_width - 1.0;
-
-                        if hit_right_border || !is_in_safe_zone {
-                            *suppress_panning.borrow_mut() = false;
-                        } else if is_in_safe_zone {
-                            *suppress_panning.borrow_mut() = true;
-                        }
-                    } else if mode.is_some() && actual_delta != 0 {
+                    if mode.is_some() && mode != Some(DragTarget::Playhead) && actual_delta != 0 {
                         let px = px_per_second_ref.borrow().as_f64();
                         let delta_ms = (actual_delta as f64 / px * 1000.0) as i32;
                         drag_offset_ms.set(*drag_offset_ms + delta_ms);
@@ -303,11 +253,10 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             let suppress_panning = suppress_panning.clone();
             let ignore_next_scroll = ignore_next_scroll.clone();
             if let Some(time_ms) = seek {
-                if let Some(audio) = audio_ref.cast::<HtmlAudioElement>() {
-                    if audio.ready_state() >= 1 {
+                if let Some(audio) = audio_ref.cast::<HtmlAudioElement>()
+                    && audio.ready_state() >= 1 {
                         audio.set_current_time(time_ms.to_secs());
                     }
-                }
 
                 if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
                     let px = px_per_second.as_f64();
@@ -339,12 +288,11 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let px_per_second = px_per_second;
 
         use_effect_with((current_time_ms, playing, drag_mode, px_per_second), move |(time, playing, mode, px_per_second)| {
-            if !*playing && *mode != Some(DragTarget::Playhead) {
-                if let Some(p) = playhead_ref.cast::<web_sys::HtmlElement>() {
+            if !*playing && *mode != Some(DragTarget::Playhead)
+                && let Some(p) = playhead_ref.cast::<web_sys::HtmlElement>() {
                     let playhead_x = time.to_secs() * px_per_second.as_f64();
                     let _ = p.set_attribute("style", &format!("transform: translateX({}px);", playhead_x));
                 }
-            }
             || ()
         });
     }
@@ -354,13 +302,11 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let viewport_ref = viewport_ref.clone();
         let scroll_left_val = *scroll_left;
         use_effect_with(scroll_left_val, move |&val| {
-            if !val.is_nan() {
-                if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                    if (v.scroll_left() as f64 - val).abs() > 0.5 {
+            if !val.is_nan()
+                && let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>()
+                    && (v.scroll_left() as f64 - val).abs() > 0.5 {
                         v.set_scroll_left(val as i32);
                     }
-                }
-            }
             || ()
         });
     }
@@ -838,12 +784,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let drag_offset_ms = drag_offset_ms.clone();
         let drag_target_uid = drag_target_uid.clone();
         let viewport_ref = viewport_ref.clone();
-        let pan_velocity = pan_velocity.clone();
         let px_per_second_ref = px_per_second_ref.clone();
         let last_mouse_pos = last_mouse_pos.clone();
-        let scroll_left_state = scroll_left.clone();
         let state = props.state.clone();
-        let current_time_ms_ref = current_time_ms_ref.clone();
         let drag_create_current = drag_create_current.clone();
 
         let drag_scrollbar_handle_offset = drag_scrollbar_handle_offset.clone();
@@ -858,43 +801,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 let delta_x = e.client_x() as f64 - *drag_start_x.borrow();
                 
                 if mode == DragTarget::Playhead {
-                    if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
-                        let r = v.get_bounding_client_rect();
-                        let mouse_x = e.client_x() as f64;
-                        
-                        let safe_zone = 90.0;
-                        if mouse_x < r.left() + safe_zone {
-                            let ratio = (r.left() + safe_zone - mouse_x) / safe_zone;
-                            *pan_velocity.borrow_mut() = -10.0 * ratio.min(1.0);
-                        } else if mouse_x > r.right() - safe_zone {
-                            let ratio = (mouse_x - (r.right() - safe_zone)) / safe_zone;
-                            *pan_velocity.borrow_mut() = 10.0 * ratio.min(1.0);
-                        } else {
-                            *pan_velocity.borrow_mut() = 0.0;
-                        }
-                        scroll_left_state.set(v.scroll_left() as f64);
-
-                        // Immediate, fluid update during scrubbing
-                        let px = px_per_second_ref.borrow().as_f64();
-                        let duration_ms = state.max_timeline_duration();
-                        let width_px_val = duration_ms.to_secs() * px;
-
-                        let absolute_x = mouse_x - r.left() + v.scroll_left() as f64;
-                        let min_x = (v.scroll_left() as f64).max(0.0);
-                        let max_x = (v.scroll_left() as f64 + v.client_width() as f64).min(width_px_val);
-                        let clamped_x = absolute_x.clamp(min_x, max_x);
-
-                        let target_time_ms = (clamped_x / px * 1000.0) as i32;
-                        let new_time = TimeMs(target_time_ms.max(0) as u32);
-                        let snapped_time = crate::web_app::editor::timeline::TimelineSnapper::snap_playhead(
-                            &state,
-                            new_time,
-                            duration_ms,
-                            *px_per_second_ref.borrow(),
-                        );
-                        *current_time_ms_ref.borrow_mut() = snapped_time;
-                        state.dispatch(AppAction::SetTime(snapped_time));
-                    }
+                    // Handled inside playback_sync.rs under request_animation_frame
                 } else if mode == DragTarget::Selection {
                     if let Some(v) = viewport_ref.cast::<web_sys::HtmlElement>() {
                         let rect = v.get_bounding_client_rect();
@@ -960,7 +867,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         let selection_rect = selection_rect.clone();
         let state = props.state.clone();
         let is_scrollbar_dragged = is_scrollbar_dragged.clone();
-        let pan_velocity = pan_velocity.clone();
         let px_per_second = px_per_second;
         let suppress_panning = suppress_panning.clone();
         let current_time_ms_ref = current_time_ms_ref.clone();
@@ -979,7 +885,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             } else {
                 *is_scrollbar_dragged.borrow_mut() = false;
             }
-            *pan_velocity.borrow_mut() = 0.0;
             
             if let Some(mode) = *drag_mode {
                 match mode {
@@ -991,27 +896,24 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     }
                     DragTarget::LeftEdge => {
                         let offset = *drag_offset_ms;
-                        if offset != 0 {
-                            if let Some(uid) = *drag_target_uid {
+                        if offset != 0
+                            && let Some(uid) = *drag_target_uid {
                                 state.dispatch(AppAction::ShiftBoundary(uid, true, false, offset));
                             }
-                        }
                     }
                     DragTarget::RightEdge => {
                         let offset = *drag_offset_ms;
-                        if offset != 0 {
-                            if let Some(uid) = *drag_target_uid {
+                        if offset != 0
+                            && let Some(uid) = *drag_target_uid {
                                 state.dispatch(AppAction::ShiftBoundary(uid, false, false, offset));
                             }
-                        }
                     }
                     DragTarget::Boundary => {
                         let offset = *drag_offset_ms;
-                        if offset != 0 {
-                            if let Some(uid) = *drag_target_uid {
+                        if offset != 0
+                            && let Some(uid) = *drag_target_uid {
                                 state.dispatch(AppAction::ShiftBoundary(uid, false, true, offset));
                             }
-                        }
                     }
                     DragTarget::Playhead => {
                         *suppress_panning.borrow_mut() = true;
