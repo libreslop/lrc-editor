@@ -272,7 +272,13 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
                     if is_off_screen || (is_in_safe_zone && !*suppress_panning.borrow()) {
                         *ignore_next_scroll.borrow_mut() = true;
-                        v.set_scroll_left((playhead_x - client_width / 2.0) as i32);
+                        let is_to_the_right = playhead_x > scroll_left + client_width - safe_zone;
+                        let target_scroll = if is_to_the_right {
+                            (playhead_x - safe_zone) as i32
+                        } else {
+                            (playhead_x - client_width / 2.0) as i32
+                        };
+                        v.set_scroll_left(target_scroll);
                         scroll_left_state.set(v.scroll_left() as f64);
                     }
                 }
