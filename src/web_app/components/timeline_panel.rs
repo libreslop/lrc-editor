@@ -1097,7 +1097,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 on_zoom_out={zoom_out}
                 scroll_left={*scroll_left}
                 viewport_width={*viewport_width}
-                total_width={if *viewport_scroll_width > 0.0 { *viewport_scroll_width } else { width_px.as_f64() }}
+                total_width={width_px.as_f64()}
                 on_scrollbar_mousedown={on_scrollbar_mousedown}
             />
             <div class="timeline-body">
