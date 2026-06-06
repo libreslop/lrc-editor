@@ -1,14 +1,96 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
+<head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>LRC Timeline Editor</title>
+    <meta name="description" content="A professional, high-performance LRC editor and lyric syncing tool. Create, edit, and export timed lyrics with an intuitive chunk-based timeline.">
+    <meta name="keywords" content="LRC editor, lyric sync, timed lyrics, karaoke maker, subtitle editor, music production, lrc generator, lyric chunker">
+    <meta name="author" content="SiriusMart">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://siriusmart.github.io/lcs-editor/">
+    <meta property="og:title" content="LRC Editor - Professional Lyric Syncing">
+    <meta property="og:description" content="Sync lyrics with precision. A high-performance web tool for creating and editing LRC files with a modern timeline interface.">
+    <meta property="og:image" content="https://siriusmart.github.io/lcs-editor/favicon.svg">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://siriusmart.github.io/lcs-editor/">
+    <meta property="twitter:title" content="LRC Editor - Professional Lyric Syncing">
+    <meta property="twitter:description" content="Sync lyrics with precision. A high-performance web tool for creating and editing LRC files with a modern timeline interface.">
+    <meta property="twitter:image" content="https://siriusmart.github.io/lcs-editor/favicon.svg">
+
+    <title>LRC Editor | Professional Lyric Syncing & Timed Lyrics</title>
+    
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link data-trunk rel="icon" href="favicon.svg">
     <link data-trunk rel="css" href="styles.css">
     <link data-trunk rel="rust">
-  </head>
-  <body>
-  </body>
+
+    <style>
+        /* Initial loading styles to keep the App Shell looking clean */
+        .app-shell {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #1e1e1e;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            text-align: center;
+        }
+        .app-shell h1 { color: #4CAF50; margin-bottom: 0.5rem; font-size: 2.5rem; }
+        .app-shell p { max-width: 600px; line-height: 1.6; opacity: 0.8; }
+        .app-shell .qa-section {
+            margin-top: 3rem;
+            text-align: left;
+            max-width: 800px;
+            width: 100%;
+        }
+        .app-shell .qa-item { margin-bottom: 1.5rem; }
+        .app-shell .qa-item h2 { font-size: 1.2rem; margin-bottom: 0.5rem; color: #81C784; }
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255,255,255,0.1);
+            border-left-color: #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- App Shell: Visible to crawlers and users during WASM initialization -->
+        <section class="app-shell">
+            <div class="loading-spinner"></div>
+            <h1>LRC Editor</h1>
+            <p>Initializing high-performance lyric syncing engine...</p>
+
+            <div class="qa-section">
+                <div class="qa-item">
+                    <h2>What is the LRC Editor?</h2>
+                    <p>It is a specialized tool for creating and editing LRC files. Unlike traditional text-based editors, it uses a visual timeline and "chunk-based" syncing to make timing lyrics faster and more precise.</p>
+                </div>
+                <div class="qa-item">
+                    <h2>How does the lyric chunker work?</h2>
+                    <p>The chunker allows you to split lyrics into logical segments (chunks) and drag them onto a timeline. You can then fine-tune their start and end times relative to the audio waveform.</p>
+                </div>
+                <div class="qa-item">
+                    <h2>Is this tool free and private?</h2>
+                    <p>Yes. The application runs entirely in your browser using WebAssembly. Your audio files and lyric data never leave your computer, ensuring complete privacy and offline capability.</p>
+                </div>
+                <div class="qa-item">
+                    <h2>Which formats are supported?</h2>
+                    <p>You can import common audio formats (MP3, WAV, OGG) and import/export standard .lrc files compatible with most music players and karaoke systems.</p>
+                </div>
+            </div>
+        </section>
+    </div>
+</body>
 </html>
