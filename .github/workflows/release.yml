@@ -28,7 +28,7 @@ jobs:
       - name: Create Zip
         run: |
           cd dist
-          zip -r ../lcs-editor-web.zip .
+          zip -r ../lrc-editor-web.zip .
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
