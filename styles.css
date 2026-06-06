@@ -14,7 +14,8 @@
   --coral: #ed7d87;
   --green: #76c76c;
   --red: #ff4b55;
-  --selection: #8b68f6;
+  --blue: #4a90e2;
+  --selection: #1fb7b0;
   --track-pad: 48px;
   --ruler-height: 28px;
   --audio-height: 104px;
@@ -760,8 +761,8 @@ svg {
 }
 
 .lyric-chunk.color-3 {
-  background: #41b59f;
-  border-color: rgba(32, 91, 81, 0.8);
+  background: var(--blue);
+  border-color: rgba(36, 75, 122, 0.8);
 }
 
 .lyric-chunk.color-4 {
@@ -788,7 +789,7 @@ svg {
 }
 
 .lyric-chunk.empty-gap.selected {
-  background: rgba(43, 116, 227, 0.2);
+  background: rgba(31, 183, 176, 0.2);
 }
 
 .lyric-chunk.ghost-chunk {
@@ -806,7 +807,7 @@ svg {
 }
 
 .lyric-chunk.drag-create-chunk {
-  background: rgba(139, 104, 246, 0.25);
+  background: rgba(31, 183, 176, 0.25);
   border: 1.5px dashed var(--selection);
   color: rgba(255, 255, 255, 0.9);
   box-shadow: none;
@@ -854,7 +855,7 @@ svg {
 .selection-rect {
   position: absolute;
   border: 1px solid var(--selection);
-  background: rgba(139, 104, 246, 0.2);
+  background: rgba(31, 183, 176, 0.2);
   pointer-events: none;
   z-index: 20;
 }
