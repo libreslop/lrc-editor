@@ -165,12 +165,7 @@ pub fn use_playback_sync(
                             let elapsed_since_input = js_sys::Date::now() - *last_user_input_time.borrow();
                             if elapsed_since_input >= 3000.0 {
                                 *ignore_next_scroll.borrow_mut() = true;
-                                let is_to_the_right = world_x > scroll_left + client_width - safe_zone;
-                                let target_scroll = if is_to_the_right {
-                                    (world_x - safe_zone) as i32
-                                } else {
-                                    (world_x - client_width / 2.0) as i32
-                                };
+                                let target_scroll = (world_x - safe_zone) as i32;
                                 v.set_scroll_left(target_scroll);
                                 scroll_left_state.set(v.scroll_left() as f64);
                             }
